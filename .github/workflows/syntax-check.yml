@@ -1,0 +1,27 @@
+name: Syntax Check
+
+on:
+  push:
+    paths:
+      - '*.user.js'
+  pull_request:
+    paths:
+      - '*.user.js'
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: node --check all userscripts
+        run: |
+          for f in *.user.js; do
+            echo "Checking $f"
+            node --check "$f" || exit 1
+          done
+          echo "All syntax checks passed ✔"
