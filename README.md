@@ -44,6 +44,7 @@
 ### 🌐 多 OJ 支持
 
 - 洛谷 / Codeforces / AtCoder / UVa 一键加入（SPOJ 暂不支持）
+- 支持快捷手动加入题目
 
 ### 💾 数据安全
 
@@ -105,3 +106,5 @@ node --check 做题计划管理器.user.js
 ---
 
 Made with ❤️ by [Nuclear_Fish_cyq](https://www.luogu.com.cn/user/670355)
+
+本脚本的开发耗费了约 14 元的 token，欢迎来[捐钱](https://cdn.luogu.com.cn/upload/image_hosting/xzraqh5b.png)嘻嘻。
