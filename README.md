@@ -1,6 +1,6 @@
 # 📚 做题计划管理器
 
-[English](./README-en.md) | [简体中文](./README-cn.md)
+[English](./README-en.md) | [简体中文](./README.md)
 
 > 做题计划管理器 v3.11.0 —— 洛谷做题计划 better
 
