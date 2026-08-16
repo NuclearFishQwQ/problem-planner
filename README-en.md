@@ -1,5 +1,7 @@
 # 📚 Problem Planner
 
+[English](./README-en.md) | [简体中文](./README.md)
+
 > Problem Planner v3.11.0 — Luogu problem planning, but better
 
 A **cross-site problem planner** for OI / ACM / algorithm learners. Injected on all sites — whether you're practicing on Luogu, Codeforces, AtCoder, or UVa, you can add problems to your own plan anytime, with focus timers, check-ins, and statistics all in one place.
