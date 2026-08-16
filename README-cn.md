@@ -1,13 +1,12 @@
 # 📚 做题计划管理器
 
-> 做题计划管理器 v3.7.2 —— 洛谷做题计划 better
+> 做题计划管理器 v3.11.0 —— 洛谷做题计划 better
 
 一款面向 OI / ACM / 算法学习者的**跨站做题计划管理器**。全站注入，无论你在刷洛谷、Codeforces、AtCoder 还是 UVa，都能随时把题目收进自己的做题清单，专注、打卡、统计一条龙。
 
 - 🦾 脚本管理端：**Tampermonkey** / **ScriptCat** 等
 - 🚀 在线安装：[GreasyFork](https://greasyfork.org/scripts/565773) 或 [ScriptCat](https://scriptcat.org/zh-CN/script-show-page/7422)
 - 📄 许可证：MIT
-- [Github 仓库求 star](https://github.com/NuclearFishQwQ/problem-planner)
 - 感谢 Deepseek 在脚本开发以及 Readme 编写中提供的支持，保证 Deepseek 的贡献远大于 [Nuclear_Fish_cyq](https://www.luogu.com.cn/user/670355)。
 - 感谢藤本树提供的精神支持。
 - 本脚本参考的项目有：[luogu-api-doc](https://github.com/0f-0b/luogu-api-docs)、[extend-luogu](https://github.com/extend-luogu/extend-luogu)。
@@ -28,19 +27,23 @@
 ### ⏱ 番茄钟专注
 
 - 专注 / 休息计时，支持自动休息
-- **跨标签页同步**，刷新不重置，防重复结算
 - 专注时长自动累计到对应题目
+
+### 📝 备忘录
+
+- 支持排序、置顶
 
 ### 📊 数据统计
 
 - 总览卡片、14 天趋势、做题热力图、难度分布
 - 每日目标设置 + 进度条
 
-### 📥 洛谷深度集成
+### 📥 洛谷、CF 深度集成
 
 - 一键导入洛谷现有做题计划、洛谷题单
-- 题单页批量导入（支持「题号 + 题名」格式）
-- 自动获取题目难度
+- 洛谷题单页批量导入（支持「题号 + 题名」格式）
+- 自动获取洛谷、RMJ 题目难度
+- 自动获取洛谷、CF 题目标签
 
 ### 🌐 多 OJ 支持
 
@@ -50,7 +53,7 @@
 ### 💾 数据安全
 
 - 导出备份 / 合并导入（按 URL 去重）/ 一键清空
-- 数据仅存本地（GM 存储），**无任何上传**
+- 数据仅存本地（GM 存储）
 
 ---
 
