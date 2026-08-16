@@ -7,6 +7,7 @@
 - 🦾 脚本管理端：**Tampermonkey** / **ScriptCat** 等
 - 🚀 在线安装：[GreasyFork](https://greasyfork.org/scripts/565773) 或 [ScriptCat](https://scriptcat.org/zh-CN/script-show-page/7422)
 - 📄 许可证：MIT
+- [Github 仓库求 star](https://github.com/NuclearFishQwQ/problem-planner)
 - 感谢 Deepseek 在脚本开发以及 Readme 编写中提供的支持，保证 Deepseek 的贡献远大于 [Nuclear_Fish_cyq](https://www.luogu.com.cn/user/670355)。
 - 感谢藤本树提供的精神支持。
 - 本脚本参考的项目有：[luogu-api-doc](https://github.com/0f-0b/luogu-api-docs)、[extend-luogu](https://github.com/extend-luogu/extend-luogu)。
@@ -86,6 +87,10 @@ node --check 做题计划管理器.user.js
 - 请合理使用题单导入功能，作者 **不** 为滥用脚本的后果负责，请 **不** 要高频使用与洛谷 API 相关功能。**合理** 使用该插件一般不会对您的 OJ 账号带来影响。
 
 ## 📜 更新日志
+
+### v3.11.x
+
+- v3.11.0：大更新。添加了暗色模式，英文 i18n，备忘录功能。一键加入题目可以自动获取标签作为备注，题单一键导入可以筛选难度区间。
 
 ### v3.7.x
 
