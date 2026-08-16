@@ -5,7 +5,7 @@
 一款面向 OI / ACM / 算法学习者的**跨站做题计划管理器**。全站注入，无论你在刷洛谷、Codeforces、AtCoder 还是 UVa，都能随时把题目收进自己的做题清单，专注、打卡、统计一条龙。
 
 - 🦾 脚本管理端：**Tampermonkey** / **ScriptCat** 等
-- 🚀 在线安装：[GreasyFork](https://greasyfork.org/scripts/565773) 或 [ScriptCat](https://scriptcat.org/zh-CN/script-show-page/7422)
+- 🚀 在线安装：[GreasyFork](https://greasyfork.org/scripts/565773)
 - 📄 许可证：MIT
 - 感谢 Deepseek 在脚本开发以及 Readme 编写中提供的支持，保证 Deepseek 的贡献远大于 [Nuclear_Fish_cyq](https://www.luogu.com.cn/user/670355)。
 - 感谢藤本树提供的精神支持。
