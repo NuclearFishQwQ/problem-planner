@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         做题计划管理器
 // @namespace    http://tampermonkey.net/
-// @version      3.7.2
-// @description  跨站做题计划管理器 v3.7.1：完成归档、置顶排序、统计图表、题目备注、番茄钟计时、题目搜索、随机一题、自定义颜色（颜色即难度）、每日目标、难度统计、洛谷题单导入、题单页批量导入、题目一键加入（洛谷、AT、CF、UVa，SPOJ暂不支持）。
+// @version      3.11.0
+// @description  跨站做题计划管理器 v3.11.0：完成归档、置顶排序、统计图表、题目备注、番茄钟计时、题目搜索、随机一题、自定义颜色（颜色即难度）、每日目标、难度统计、洛谷题单导入、题单页批量导入、题目一键加入（洛谷、AT、CF、UVa，SPOJ暂不支持）。标签自动按「来源/时间/区域/算法/特殊题目」分类排序，洛谷标签支持英文；CF 题目自动附带 CF 标签与难度评分；内置备忘录（紧急置顶、排序、计数角标）；完整中英文界面（可在设置中切换）。
 // @author       Nuclear_Fish_cyq
 // @match        *://*/*
 // @license      MIT
@@ -13,6 +13,8 @@
 // @grant        GM_xmlhttpRequest
 // @connect      www.luogu.com.cn
 // @connect      luogu.com.cn
+// @connect      codeforces.com
+// @connect      www.codeforces.com
 // @downloadURL https://update.greasyfork.org/scripts/565773/%E5%81%9A%E9%A2%98%E8%AE%A1%E5%88%92%E7%AE%A1%E7%90%86%E5%99%A8.user.js
 // @updateURL https://update.greasyfork.org/scripts/565773/%E5%81%9A%E9%A2%98%E8%AE%A1%E5%88%92%E7%AE%A1%E7%90%86%E5%99%A8.meta.js
 // ==/UserScript==
@@ -46,19 +48,29 @@
     ];
     const DIFF_MAX = DIFFICULTY_META.length - 1;
 
+    // 洛谷难度英文名（与 DIFFICULTY_META 顺序一致，用于英文界面）
+    const DIFFICULTY_META_EN = [
+        'Unrated', 'Beginner', 'Popularization-', 'Popularization',
+        'Popularization+/Improvement', 'Improvement', 'Improvement+/Provincial-',
+        'Provincial/NOI-', 'NOI/NOI+/CTS'
+    ];
+
     // 存储键名（沿用旧版，保证无缝升级）
     const STORAGE_KEY = 'problemPlanner_data';
     const ARCHIVE_KEY = 'problemPlanner_archive';
     const COUNT_KEY = 'problemPlanner_completedCount';
     const TIMER_KEY = 'problemPlanner_timer';
     const SETTINGS_KEY = 'problemPlanner_settings';
+    const MEMO_KEY = 'problemPlanner_memos';
 
     // 默认设置
     const DEFAULT_SETTINGS = {
         focusMinutes: 25,
         breakMinutes: 5,
         autoBreak: true,
-        dailyGoal: 0
+        dailyGoal: 0,
+        theme: 'auto', // auto | light | dark（跟随系统 / 浅色 / 深色）
+        lang: 'zh-CN'  // zh-CN | en | auto（跟随系统语言）
     };
 
     // ==================== 状态 ====================
@@ -72,15 +84,285 @@
     let editingUrl = null;
     let timerState = null;
     let timerInterval = null;
-    let currentTab = 'active'; // active | done | stats
+    let currentTab = 'active'; // active | done | stats | memo
     let searchQuery = ''; // 进行中列表的搜索关键词
+    let currentLang = 'zh-CN'; // 当前界面语言（由 settings.lang 解析）
+    let memos = []; // 备忘录列表 {id, text, urgent, createdAt}
+
+    // ==================== 国际化 (i18n) ====================
+
+    const I18N = {
+        'zh-CN': {
+            'app.name': '做题计划',
+            'fab.text': '题',
+            'fab.title': '打开做题计划（跨网站同步）',
+            'tab.active': '进行中', 'tab.done': '已完成', 'tab.stats': '统计', 'tab.memo': '备忘',
+            'form.urlLabel': '题目网址', 'form.nameLabel': '题目名称', 'form.colorLabel': '选择颜色',
+            'form.namePlaceholder': '默认使用当前页面标题', 'form.addBtn': '添加题目到计划',
+            'search.placeholder': '🔍 搜索题目名 / 备注 / 网址…',
+            'search.randomBtn': '🎲 随机一题', 'search.randomTitle': '从未理解题目中随机抽一道',
+            'backup.title': '💾 数据备份',
+            'backup.export': '导出数据', 'backup.import': '导入数据', 'backup.clear': '清空数据',
+            'backup.luogu': '📥 洛谷导入', 'backup.settings': '⚙ 设置',
+            'backup.note': '导出包含进行中、已完成归档、备注、计时统计（v3 格式）',
+            'backup.filename': '做题计划备份',
+            'luogu.urlLabel': '洛谷题单 / 做题计划链接',
+            'luogu.tagsLabel': '🏷 添加标签', 'luogu.tagsTitle': '导入时自动获取题目标签写入备注',
+            'luogu.diffLabel': '难度', 'luogu.diffTitle': '只导入该难度范围内的题目',
+            'luogu.start': '开始导入题单', 'luogu.homeImport': '从当前洛谷主页任务计划导入',
+            'settings.focus': '专注时长', 'settings.minutes': '分钟', 'settings.break': '休息时长',
+            'settings.autoBreak': '自动休息', 'settings.autoBreakDesc': '专注结束后自动开始休息',
+            'settings.dailyGoal': '每日目标', 'settings.dailyGoalDesc': '题（0 = 不启用）',
+            'settings.theme': '主题', 'settings.themeAuto': '跟随系统', 'settings.themeLight': '浅色',
+            'settings.themeDark': '深色', 'settings.themeDesc': '面板外观',
+            'settings.lang': '语言', 'settings.langAuto': '跟随系统', 'settings.langZh': '中文', 'settings.langEn': 'English',
+            'footer.notUnderstood': '未理解', 'footer.understood': '已理解',
+            'footer.completed': '已完成', 'footer.totalTime': '累计专注',
+            'misc.unnamed': '(未命名)', 'misc.unnamedProblem': '未命名题目',
+            'memo.placeholder': '输入备忘内容…', 'memo.addBtn': '添加',
+            'memo.empty': '暂无备忘，点击上方输入框添加',
+            'memo.urgent': '紧急', 'memo.unurgent': '取消紧急',
+            'memo.urgentTitle': '设为紧急备忘（置顶显示，角标变红）', 'memo.unurgentTitle': '取消紧急标记',
+            'memo.delete': '删除', 'memo.deleteTitle': '删除该备忘',
+            'memo.confirmDelete': '确定删除这条备忘吗？', 'memo.urgentBadge': '紧急',
+            'item.understand': '理解', 'item.understandTitle': '标记为已理解（移至底部）',
+            'item.complete': '完成', 'item.completeTitle': '标记为已完成（移入归档）',
+            'item.giveup': '放弃', 'item.giveupTitle': '放弃此题（不计入完成）',
+            'item.note': '备注', 'item.noteTitleEdit': '编辑备注（已展示在下方）', 'item.noteTitleAdd': '添加备注',
+            'item.noteViewTitle': '点击可编辑备注',
+            'item.color': '颜色', 'item.colorTitleSet': '修改自定义颜色（当前已设置）', 'item.colorTitleCustom': '自定义题目颜色（覆盖难度色）',
+            'item.resetColor': '恢复默认', 'item.resetColorTitle': '清除自定义颜色',
+            'item.timer': '计时', 'item.timerTitle': '番茄钟：开始 {m} 分钟专注',
+            'item.stop': '停止', 'item.stopTitle': '停止计时（结算已专注时间）',
+            'item.pinned': '已置顶', 'item.pin': '置顶', 'item.pinTitleUnpin': '取消置顶', 'item.pinTitle': '置顶（排在列表前面）',
+            'item.moveUp': '上移', 'item.moveDown': '下移', 'item.timeBadgeTitle': '累计专注时长',
+            'timer.focusPause': '专注中…点击暂停', 'timer.paused': '已暂停，点击继续', 'timer.break': '休息中…点击跳过',
+            'note.placeholder': '记录思路、坑点、题解链接…', 'note.save': '保存', 'note.cancel': '取消',
+            'empty.active': '暂无待做题目，请添加题目到计划中', 'empty.noMatch': '没有匹配「{q}」的题目',
+            'archive.summary': '共 {n} 条完成记录', 'archive.time': '归档专注 {d}',
+            'archive.empty': '暂无完成记录，做完题目会自动归档到这里',
+            'archive.completedAt': '✅ 完成于 {d}', 'archive.focus': '⏱ 专注 {d}', 'archive.addedAt': '📅 添加于 {d}',
+            'archive.restore': '恢复', 'archive.restoreTitle': '恢复到进行中列表',
+            'archive.delete': '删除', 'archive.deleteTitle': '永久删除该条完成记录',
+            'stats.total': '总完成', 'stats.today': '今日完成', 'stats.streak': '连续打卡(天)', 'stats.totalTime': '累计专注',
+            'stats.goalTitle': '🎯 今日目标', 'stats.goalProgress': '{t} / {g} 题', 'stats.goalDone': ' · 达成 🎉',
+            'stats.trendTitle': '14 天完成趋势', 'stats.trendSub': '每天完成的题目数',
+            'stats.diffTitle': '难度分布', 'stats.diffSub': '已完成题目 · 洛谷难度', 'stats.diffNone': '暂无评定',
+            'stats.heatmapTitle': '月度打卡热力图', 'stats.heatmapSub': '最近 15 周 · 颜色=最难题难度，色深=完成数',
+            'stats.legendDifficulty': '难度', 'stats.legendCount': '完成数',
+            'stats.trendTooltip': '{m}月{d}日：完成 {n} 题', 'stats.heatTooltip': '{m}月{d}日：完成 {n} 题 · 最难 {l}',
+            'confirm.complete': '确定要标记题目 "{name}" 为已完成吗？',
+            'confirm.giveup': '确定要放弃题目 "{name}" 吗？',
+            'confirm.restore': '将 "{name}" 恢复到进行中列表？',
+            'confirm.deleteRecord': '永久删除记录 "{name}"？（不影响已完成计数）',
+            'confirm.clear': '确定要清空所有数据（含已完成归档）吗？此操作不可撤销。',
+            'confirm.import': '准备合并导入 {a} 个进行中题目\n已完成归档：{b} 条\n完成计数：{c}\n\n合并模式：按网址去重，已存在的题目不会被覆盖。\n确定继续吗？',
+            'alert.importFail': '导入失败：{e}\n\n请确保选择的是有效的备份文件。',
+            'toast.imported': '合并完成：新增进行中 {a} · 归档 {b}',
+            'toast.importedSkip': ' · 跳过重复 {n}',
+            'toast.moveRestricted': '置顶与未置顶不能互相移动',
+            'toast.noteSaved': '备注已保存', 'toast.recordDeleted': '记录已删除',
+            'toast.alreadyActive': '该题目已在进行中，仅移除归档记录', 'toast.restored': '已恢复到进行中',
+            'toast.noUnsolved': '暂无未理解的题目 🎉', 'toast.randomPick': '🎲 随机一题：{name}',
+            'toast.focusDoneBreak': '专注完成！休息一下吧 ☕', 'toast.focusDone': '专注完成！🏆',
+            'toast.breakDone': '休息结束，继续加油 💪', 'toast.focusStart': '开始专注 {m} 分钟 ⏱',
+            'toast.settingsSaved': '设置已保存', 'toast.exported': '数据已导出（含归档）', 'toast.cleared': '数据已清空',
+            'toast.addSuccess': '添加成功！', 'toast.added': '已加入计划', 'toast.addedDiff': '已加入计划 · 难度 {d}',
+            'toast.addedTags': ' · 标签 {n} 个',
+            'toast.alreadyInPlan': '此题目已在计划中！', 'toast.alreadyDone': '此题目已在已完成记录中！',
+            'toast.tagsOn': '已开启：加入时自动获取标签写入备注', 'toast.tagsOff': '已关闭：加入时不获取标签',
+            'toast.goalDone': '🎯 今日目标 {g} 题已达成！太棒了', 'toast.archived': '已归档 🎉 · 今日 {t}/{g}', 'toast.archivedPlain': '已归档 🎉',
+            'alert.invalidUrl': '请输入有效的网址！', 'alert.alreadyDoneAdd': '此题目已在已完成记录中，不能重复添加！',
+            'alert.readFail': '读取文件失败，请重试', 'alert.fetchFail': '获取题目信息失败：{e}\n\n题目未加入。',
+            'alert.joinFail': '加入失败：{e}', 'alert.enterLuoguUrl': '请先粘贴洛谷题单链接',
+            'alert.invalidData': '数据格式不正确：缺少题目列表',
+            'err.luoguStatus': '洛谷返回状态码 {s}',
+            'err.network': '网络请求失败',
+            'err.timeout': '请求超时',
+            'err.luoguMissing': '洛谷未收录该题或解析失败（{pid}）',
+            'err.onlyTraining': '仅支持洛谷题单链接（luogu.com.cn/training/xxx）',
+            'err.noPids': '未从题单中解析到题目（请检查链接是否有效）',
+            'err.cfFail': '获取 CF 题目信息失败',
+            'import.parsing': '正在解析题单…', 'import.found': '解析到 {n} 道题，开始获取题目信息…',
+            'import.noModule': '未在主页找到任务计划模块，请确认已登录洛谷并打开主页。',
+            'import.homeFound': '主页任务计划解析到 {n} 道题，开始获取难度…',
+            'import.fetching': '正在获取 {i}/{n}：{pid} …', 'import.done': '导入完成：新增 {a} · 跳过 {s}',
+            'import.doneDiff': ' · 难度不符 {d}', 'import.doneFail': ' · 失败 {n}', 'import.failList': '失败题目：{list}',
+            'toast.trainingDone': '题单导入完成：新增 {a} · 跳过 {s}', 'toast.trainingFail': '题单导入失败：{e}',
+            'oj.fetching': '⏳ 获取中…', 'oj.addBtn': '＋ 加入做题计划', 'oj.addBtnTitle': '获取洛谷 RMJ 难度并加入做题计划',
+            'oj.joined': '✓ 已加入', 'oj.tagToggle': '🏷 标签', 'oj.tagToggleOn': '🏷 标签 ✓',
+            'oj.tagToggleTitle': '点击切换：是否自动获取题目标签写入备注（当前：{s}）', 'oj.on': '开', 'oj.off': '关',
+            'oj.diff': '🎚 难度', 'oj.diffTitle': '选择加入题目的难度范围', 'oj.diffMin': '最低', 'oj.diffMax': '最高',
+            'training.importAll': '📥 导入整个题单', 'training.importAllTitle': '将当前洛谷题单的所有题目批量加入做题计划',
+            'training.parsing': '⏳ 解析题单…', 'training.fetching': '⏳ 获取题目信息…', 'training.imported': '✓ 已导入 {n} 题',
+            'home.importBtn': '从当前洛谷主页任务计划导入', 'home.needHome': '需在洛谷主页使用'
+        },
+        'en': {
+            'app.name': 'Problem Planner',
+            'fab.text': 'P',
+            'fab.title': 'Open Problem Planner (synced across sites)',
+            'tab.active': 'In Progress', 'tab.done': 'Completed', 'tab.stats': 'Stats', 'tab.memo': 'Memo',
+            'form.urlLabel': 'Problem URL', 'form.nameLabel': 'Problem Name', 'form.colorLabel': 'Choose Color',
+            'form.namePlaceholder': 'Default: current page title', 'form.addBtn': 'Add to Plan',
+            'search.placeholder': '🔍 Search name / notes / URL…',
+            'search.randomBtn': '🎲 Random', 'search.randomTitle': 'Pick a random unsolved problem',
+            'backup.title': '💾 Data Backup',
+            'backup.export': 'Export', 'backup.import': 'Import', 'backup.clear': 'Clear All',
+            'backup.luogu': '📥 Import from Luogu', 'backup.settings': '⚙ Settings',
+            'backup.note': 'Export includes in-progress, archived, notes, and timer stats (v3 format)',
+            'backup.filename': 'problem-planner-backup',
+            'luogu.urlLabel': 'Luogu Training List URL',
+            'luogu.tagsLabel': '🏷 Add Tags', 'luogu.tagsTitle': 'Auto-fetch problem tags into notes',
+            'luogu.diffLabel': 'Difficulty', 'luogu.diffTitle': 'Only import problems in this difficulty range',
+            'luogu.start': 'Start Import', 'luogu.homeImport': 'Import from Luogu homepage task plan',
+            'settings.focus': 'Focus length', 'settings.minutes': 'min', 'settings.break': 'Break length',
+            'settings.autoBreak': 'Auto break', 'settings.autoBreakDesc': 'Auto start break after focus',
+            'settings.dailyGoal': 'Daily goal', 'settings.dailyGoalDesc': 'problems (0 = off)',
+            'settings.theme': 'Theme', 'settings.themeAuto': 'Follow system', 'settings.themeLight': 'Light',
+            'settings.themeDark': 'Dark', 'settings.themeDesc': 'Panel appearance',
+            'settings.lang': 'Language', 'settings.langAuto': 'Follow system', 'settings.langZh': '中文', 'settings.langEn': 'English',
+            'footer.notUnderstood': 'Not Understood', 'footer.understood': 'Understood',
+            'footer.completed': 'Completed', 'footer.totalTime': 'Total Focus',
+            'misc.unnamed': '(Untitled)', 'misc.unnamedProblem': 'Untitled problem',
+            'memo.placeholder': 'Type a memo…', 'memo.addBtn': 'Add',
+            'memo.empty': 'No memos yet',
+            'memo.urgent': 'Urgent', 'memo.unurgent': 'Unmark urgent',
+            'memo.urgentTitle': 'Mark as urgent (pin to top, badge turns red)', 'memo.unurgentTitle': 'Remove urgent mark',
+            'memo.delete': 'Delete', 'memo.deleteTitle': 'Delete this memo',
+            'memo.confirmDelete': 'Delete this memo?', 'memo.urgentBadge': 'URGENT',
+            'item.understand': 'Got it', 'item.understandTitle': 'Mark as understood (move to bottom)',
+            'item.complete': 'Done', 'item.completeTitle': 'Mark as completed (move to archive)',
+            'item.giveup': 'Give up', 'item.giveupTitle': 'Give up (not counted)',
+            'item.note': 'Note', 'item.noteTitleEdit': 'Edit note', 'item.noteTitleAdd': 'Add note',
+            'item.noteViewTitle': 'Click to edit note',
+            'item.color': 'Color', 'item.colorTitleSet': 'Change custom color', 'item.colorTitleCustom': 'Custom color (overrides difficulty)',
+            'item.resetColor': 'Reset', 'item.resetColorTitle': 'Clear custom color',
+            'item.timer': 'Timer', 'item.timerTitle': 'Pomodoro: start {m} min focus',
+            'item.stop': 'Stop', 'item.stopTitle': 'Stop timer (settle focus time)',
+            'item.pinned': 'Pinned', 'item.pin': 'Pin', 'item.pinTitleUnpin': 'Unpin', 'item.pinTitle': 'Pin to top',
+            'item.moveUp': 'Move up', 'item.moveDown': 'Move down', 'item.timeBadgeTitle': 'Total focus time',
+            'timer.focusPause': 'Focusing… click to pause', 'timer.paused': 'Paused, click to resume', 'timer.break': 'On break… click to skip',
+            'note.placeholder': 'Note your thoughts, pitfalls, solution links…', 'note.save': 'Save', 'note.cancel': 'Cancel',
+            'empty.active': 'No problems yet. Add one to your plan.', 'empty.noMatch': 'No problems match "{q}"',
+            'archive.summary': '{n} completed records', 'archive.time': 'Archived focus {d}',
+            'archive.empty': 'No completed records yet',
+            'archive.completedAt': '✅ Completed {d}', 'archive.focus': '⏱ Focus {d}', 'archive.addedAt': '📅 Added {d}',
+            'archive.restore': 'Restore', 'archive.restoreTitle': 'Restore to in-progress',
+            'archive.delete': 'Delete', 'archive.deleteTitle': 'Permanently delete this record',
+            'stats.total': 'Total Completed', 'stats.today': 'Today', 'stats.streak': 'Streak (days)', 'stats.totalTime': 'Total Focus',
+            'stats.goalTitle': '🎯 Daily Goal', 'stats.goalProgress': '{t} / {g} problems', 'stats.goalDone': ' · reached 🎉',
+            'stats.trendTitle': '14-Day Trend', 'stats.trendSub': 'problems completed per day',
+            'stats.diffTitle': 'Difficulty Distribution', 'stats.diffSub': 'Completed · Luogu difficulty', 'stats.diffNone': 'Unrated',
+            'stats.heatmapTitle': 'Monthly Heatmap', 'stats.heatmapSub': 'Last 15 weeks · color=difficulty, shade=count',
+            'stats.legendDifficulty': 'Difficulty', 'stats.legendCount': 'Count',
+            'stats.trendTooltip': '{m}/{d}: {n} problems', 'stats.heatTooltip': '{m}/{d}: {n} problems · hardest {l}',
+            'confirm.complete': 'Mark "{name}" as completed?',
+            'confirm.giveup': 'Give up on "{name}"?',
+            'confirm.restore': 'Restore "{name}" to in-progress?',
+            'confirm.deleteRecord': 'Permanently delete record "{name}"? (completion count unchanged)',
+            'confirm.clear': 'Clear all data (including archive)? This cannot be undone.',
+            'confirm.import': 'About to merge-import {a} in-progress problems\nArchived: {b}\nCompletion count: {c}\n\nMerge mode: dedupe by URL; existing problems will not be overwritten.\nContinue?',
+            'alert.importFail': 'Import failed: {e}\n\nMake sure you selected a valid backup file.',
+            'toast.imported': 'Import merged: active +{a} · archive +{b}',
+            'toast.importedSkip': ' · skipped duplicates {n}',
+            'toast.moveRestricted': 'Cannot move between pinned and unpinned',
+            'toast.noteSaved': 'Note saved', 'toast.recordDeleted': 'Record deleted',
+            'toast.alreadyActive': 'Already in progress; removed archive record only', 'toast.restored': 'Restored to in-progress',
+            'toast.noUnsolved': 'No unsolved problems 🎉', 'toast.randomPick': '🎲 Random: {name}',
+            'toast.focusDoneBreak': 'Focus done! Take a break ☕', 'toast.focusDone': 'Focus done! 🏆',
+            'toast.breakDone': 'Break over, keep going 💪', 'toast.focusStart': 'Focus {m} min ⏱',
+            'toast.settingsSaved': 'Settings saved', 'toast.exported': 'Data exported (with archive)', 'toast.cleared': 'Data cleared',
+            'toast.addSuccess': 'Added!', 'toast.added': 'Added to plan', 'toast.addedDiff': 'Added · difficulty {d}',
+            'toast.addedTags': ' · {n} tags',
+            'toast.alreadyInPlan': 'Already in your plan!', 'toast.alreadyDone': 'Already in completed records!',
+            'toast.tagsOn': 'On: auto-fetch tags into notes', 'toast.tagsOff': 'Off: tags not fetched',
+            'toast.goalDone': '🎯 Daily goal {g} reached! Great job', 'toast.archived': 'Archived 🎉 · today {t}/{g}', 'toast.archivedPlain': 'Archived 🎉',
+            'alert.invalidUrl': 'Please enter a valid URL!', 'alert.alreadyDoneAdd': 'Already in completed records!',
+            'alert.readFail': 'Failed to read file, please retry', 'alert.fetchFail': 'Failed to fetch problem info: {e}\n\nNot added.',
+            'alert.joinFail': 'Add failed: {e}', 'alert.enterLuoguUrl': 'Please paste a Luogu training list URL first',
+            'alert.invalidData': 'Invalid data: missing problem list',
+            'err.luoguStatus': 'Luogu returned status code {s}',
+            'err.network': 'Network request failed',
+            'err.timeout': 'Request timed out',
+            'err.luoguMissing': 'Problem not on Luogu or parse failed ({pid})',
+            'err.onlyTraining': 'Only Luogu training list links are supported (luogu.com.cn/training/xxx)',
+            'err.noPids': 'No problems parsed from the training list (check the link)',
+            'err.cfFail': 'Failed to fetch CF problem info',
+            'import.parsing': 'Parsing training list…', 'import.found': 'Found {n} problems, fetching info…',
+            'import.noModule': 'Task plan module not found. Ensure you are logged in on the Luogu homepage.',
+            'import.homeFound': 'Found {n} problems in homepage plan, fetching difficulty…',
+            'import.fetching': 'Fetching {i}/{n}: {pid} …', 'import.done': 'Import done: added {a} · skipped {s}',
+            'import.doneDiff': ' · difficulty mismatch {d}', 'import.doneFail': ' · failed {n}', 'import.failList': 'Failed: {list}',
+            'toast.trainingDone': 'Import done: added {a} · skipped {s}', 'toast.trainingFail': 'Import failed: {e}',
+            'oj.fetching': '⏳ Fetching…', 'oj.addBtn': '＋ Add to plan', 'oj.addBtnTitle': 'Fetch Luogu RMJ difficulty and add to plan',
+            'oj.joined': '✓ Added', 'oj.tagToggle': '🏷 Tags', 'oj.tagToggleOn': '🏷 Tags ✓',
+            'oj.tagToggleTitle': 'Toggle: auto-fetch tags into notes (current: {s})', 'oj.on': 'on', 'oj.off': 'off',
+            'oj.diff': '🎚 Difficulty', 'oj.diffTitle': 'Choose difficulty range', 'oj.diffMin': 'Min', 'oj.diffMax': 'Max',
+            'training.importAll': '📥 Import whole list', 'training.importAllTitle': 'Add all problems in this training list',
+            'training.parsing': '⏳ Parsing…', 'training.fetching': '⏳ Fetching info…', 'training.imported': '✓ Imported {n}',
+            'home.importBtn': 'Import from homepage task plan', 'home.needHome': 'Only on Luogu homepage'
+        }
+    };
+
+    // 根据 settings.lang 解析当前语言（auto → 浏览器语言：zh 开头走中文，否则英文）
+    function resolveLang() {
+        const l = settings.lang || 'zh-CN';
+        if (l === 'en') return 'en';
+        if (l === 'auto') {
+            const nav = (navigator.language || navigator.userLanguage || 'zh-CN').toLowerCase();
+            return nav.indexOf('zh') === 0 ? 'zh-CN' : 'en';
+        }
+        return 'zh-CN';
+    }
+
+    // 取文案，支持 {name} 占位符替换
+    function t(key, params) {
+        const dict = I18N[currentLang] || I18N['zh-CN'];
+        let s = (dict && dict[key] !== undefined) ? dict[key]
+            : (I18N['zh-CN'][key] !== undefined ? I18N['zh-CN'][key] : key);
+        if (params) {
+            Object.keys(params).forEach(k => { s = s.split('{' + k + '}').join(String(params[k])); });
+        }
+        return s;
+    }
+
+    // 静态模板文案：遍历 data-i18n / data-i18n-placeholder / data-i18n-title 元素
+    function applyStaticI18n() {
+        panel.querySelectorAll('[data-i18n]').forEach(el => { el.textContent = t(el.getAttribute('data-i18n')); });
+        panel.querySelectorAll('[data-i18n-placeholder]').forEach(el => { el.placeholder = t(el.getAttribute('data-i18n-placeholder')); });
+        panel.querySelectorAll('[data-i18n-title]').forEach(el => { el.title = t(el.getAttribute('data-i18n-title')); });
+        fab.textContent = t('fab.text');
+        fab.title = t('fab.title');
+    }
+
+    // 应用语言：切换后刷新静态文案 + 当前视图动态文案 + 悬浮按钮
+    function applyLang() {
+        currentLang = resolveLang();
+        applyStaticI18n();
+        if (isPanelVisible) {
+            if (currentTab === 'active') renderProblems();
+            else if (currentTab === 'done') renderArchiveList();
+            else if (currentTab === 'stats') renderStats();
+            else if (currentTab === 'memo') renderMemos();
+            syncSettingsUI();
+            refreshHomeImportBtn();
+        }
+        // 强制重建 OJ / 题单页悬浮按钮以刷新文案
+        if (ojBtn) { ojBtn.remove(); ojBtn = null; ojInjectedKey = ''; }
+        if (trainingBtn) { trainingBtn.remove(); trainingBtn = null; trainingBtnKey = ''; }
+        ensureOJButton();
+        ensureTrainingButton();
+    }
 
     // ==================== 工具 ====================
 
     function normalizeDifficulty(d) {
         return Number.isInteger(d) && d >= 0 && d <= DIFF_MAX ? d : null;
     }
-    function difficultyLabel(d) { return DIFFICULTY_META[d] ? DIFFICULTY_META[d].label : ''; }
+    function difficultyLabel(d) {
+        if (!DIFFICULTY_META[d]) return '';
+        return currentLang === 'en' ? DIFFICULTY_META_EN[d] : DIFFICULTY_META[d].label;
+    }
     function difficultyColor(d) { return DIFFICULTY_META[d] ? DIFFICULTY_META[d].color : '#BFBFBF'; }
 
     // 颜色十六进制 → 难度等级（0-8），未知颜色返回 null
@@ -144,7 +426,7 @@
     function normalizeProblem(p) {
         return {
             url: p.url || '',
-            name: p.name || '(未命名)',
+            name: p.name || t('misc.unnamed'),
             color: p.color || COLOR_OPTIONS[0],
             customColor: typeof p.customColor === 'string' ? p.customColor : '',
             addedDate: p.addedDate || new Date().toISOString(),
@@ -160,7 +442,7 @@
     function normalizeArchiveItem(a) {
         return {
             url: a.url || '',
-            name: a.name || '(未命名)',
+            name: a.name || t('misc.unnamed'),
             color: a.color || COLOR_OPTIONS[0],
             customColor: typeof a.customColor === 'string' ? a.customColor : '',
             addedDate: a.addedDate || a.completedDate || new Date().toISOString(),
@@ -206,6 +488,31 @@
     function saveArchive() {
         try {
             GM_setValue(ARCHIVE_KEY, JSON.stringify(archive));
+        } catch (e) { /* ignore */ }
+    }
+
+    function normalizeMemo(m) {
+        return {
+            id: (typeof m.id === 'string' && m.id) ? m.id : ('m' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 7)),
+            text: typeof m.text === 'string' ? m.text : '',
+            urgent: !!m.urgent,
+            createdAt: m.createdAt || new Date().toISOString()
+        };
+    }
+
+    function loadMemos() {
+        try {
+            const saved = GM_getValue(MEMO_KEY);
+            memos = saved ? JSON.parse(saved).map(normalizeMemo).filter(m => m.text) : [];
+        } catch (e) {
+            console.error('[做题计划] 加载备忘录失败:', e);
+            memos = [];
+        }
+    }
+
+    function saveMemos() {
+        try {
+            GM_setValue(MEMO_KEY, JSON.stringify(memos));
         } catch (e) { /* ignore */ }
     }
 
@@ -260,6 +567,15 @@
             timerState = newValue ? JSON.parse(newValue) : null;
             if (timerState && !('accrued' in timerState)) timerState.accrued = false;
             adoptTimerState();
+        } catch (e) { /* ignore */ }
+    });
+
+    GM_addValueChangeListener(MEMO_KEY, function (key, oldValue, newValue, remote) {
+        if (!remote) return;
+        try {
+            memos = newValue ? JSON.parse(newValue).map(normalizeMemo).filter(m => m.text) : [];
+            updateMemoCount();
+            if (isPanelVisible && currentTab === 'memo') renderMemos();
         } catch (e) { /* ignore */ }
     });
 
@@ -357,14 +673,14 @@
                 timerState.endsAt = now + timerState.duration * 1000;
                 timerState.running = true;
                 saveTimerState();
-                showToast('专注完成！休息一下吧 ☕', '#52C41A');
+                showToast(t('toast.focusDoneBreak'), '#52C41A');
             } else {
                 clearTimer();
-                showToast('专注完成！🏆', '#52C41A');
+                showToast(t('toast.focusDone'), '#52C41A');
             }
         } else {
             clearTimer();
-            showToast('休息结束，继续加油 💪', '#FFC116');
+            showToast(t('toast.breakDone'), '#FFC116');
         }
         if (isPanelVisible && currentTab === 'active') renderProblems();
     }
@@ -391,7 +707,7 @@
         saveTimerState();
         ensureTicking();
         if (isPanelVisible && currentTab === 'active') renderProblems();
-        showToast('开始专注 ' + settings.focusMinutes + ' 分钟 ⏱', '#3498DB');
+        showToast(t('toast.focusStart', { m: settings.focusMinutes }), '#3498DB');
     }
 
     function pauseTimer() {
@@ -535,6 +851,34 @@
         }
         .pp-tab:hover { color: #4f7cff; }
         .pp-tab.active { color: #4f7cff; border-bottom-color: #4f7cff; }
+        /* 备忘录 */
+        .pp-tab-badge {
+            display: inline-block; min-width: 15px; height: 15px; line-height: 15px;
+            border-radius: 999px; background: #d5dbea; color: #5a6485;
+            font-size: 10px; font-weight: 800; text-align: center; padding: 0 4px; margin-left: 3px;
+            vertical-align: middle;
+        }
+        .pp-tab-badge.urgent { background: #FE4C61; color: #fff; animation: pp-badge-pulse 1.6s ease infinite; }
+        @keyframes pp-badge-pulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.18); } }
+        .pp-memo-form { display: flex; gap: 8px; padding: 12px 22px 10px; border-bottom: 1px solid #eef1f8; align-items: center; }
+        .pp-memo-form .pp-input { flex: 1; }
+        .pp-memo-form .pp-btn { flex-shrink: 0; height: 34px; }
+        .pp-memo-item {
+            display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; flex-wrap: wrap;
+            padding: 11px 12px 11px 14px; margin-bottom: 9px;
+            background: #fff; border: 1px solid #eef1f8; border-radius: 14px;
+            box-shadow: 0 2px 6px rgba(23,43,99,.05);
+            transition: transform .2s, box-shadow .2s, border-color .2s;
+            animation: pp-item-in .25s ease both;
+        }
+        .pp-memo-item:hover { transform: translateX(4px); box-shadow: 0 6px 14px rgba(23,43,99,.10); }
+        .pp-memo-item.urgent { border-left: 4px solid #FE4C61; background: linear-gradient(90deg, #fff0f2, #fff); box-shadow: 0 2px 8px rgba(254,76,97,.15); }
+        .pp-memo-main { flex: 1; min-width: 0; }
+        .pp-memo-text { font-size: 14px; word-break: break-word; white-space: pre-wrap; line-height: 1.5; color: #2a3248; }
+        .pp-memo-item.urgent .pp-memo-text { font-weight: 700; }
+        .pp-memo-urgent-badge { display: inline-block; font-size: 10px; font-weight: 800; color: #fff; background: #FE4C61; border-radius: 999px; padding: 1px 7px; margin-bottom: 4px; letter-spacing: .5px; }
+        .pp-memo-actions { display: flex; gap: 5px; align-items: center; flex-shrink: 0; flex-wrap: wrap; }
+        .pp-memo-time { font-size: 11px; color: #8a93b0; margin-top: 3px; }
         .pp-body { flex: 1; overflow-y: auto; }
         .pp-body::-webkit-scrollbar { width: 6px; }
         .pp-body::-webkit-scrollbar-thumb { background: #d5dbee; border-radius: 999px; }
@@ -758,8 +1102,11 @@
         .pp-diff-fill { height: 100%; border-radius: 999px; min-width: 2px; transition: width .4s; }
         .pp-diff-count { width: 26px; flex-shrink: 0; color: #5a6485; font-weight: 700; text-align: left; }
         /* OJ 一键加入按钮 */
-        .pp-oj-btn {
+        .pp-oj-group {
             position: fixed; right: 24px; bottom: 100px; z-index: 999998;
+            display: flex; align-items: flex-start; gap: 8px; flex-direction: column;
+        }
+        .pp-oj-btn {
             background: linear-gradient(135deg, #52c41a, #34a8f0); color: #fff;
             border: none; border-radius: 999px; padding: 10px 16px;
             font-size: 13px; font-weight: 700; cursor: pointer; font-family: inherit;
@@ -769,6 +1116,44 @@
         .pp-oj-btn:hover { transform: translateY(-2px); box-shadow: 0 10px 22px rgba(52,168,240,.45); }
         .pp-oj-btn:disabled { opacity: .7; cursor: wait; }
         .pp-oj-btn.ok { background: linear-gradient(135deg, #2bb673, #1e9e63); }
+        /* 标签开关 / 难度范围按钮 */
+        .pp-oj-tag-toggle {
+            background: #fff; color: #5a6485; border: 1.5px solid #d5dbea;
+            border-radius: 999px; padding: 6px 13px; cursor: pointer;
+            font-size: 12px; font-weight: 700; font-family: inherit;
+            box-shadow: 0 2px 6px rgba(23,43,99,.12);
+            transition: all .2s;
+        }
+        .pp-oj-tag-toggle:hover { border-color: #4f7cff; color: #4f7cff; }
+        .pp-oj-tag-toggle.on {
+            color: #fff; border-color: #52c41a;
+            background: linear-gradient(135deg, #52c41a, #2fa557);
+            box-shadow: 0 4px 10px rgba(82,196,26,.3);
+        }
+        /* 难度范围内联面板 */
+        .pp-oj-diff-panel {
+            background: #fff; border: 1px solid #e9edf9; border-radius: 12px;
+            padding: 9px 11px; box-shadow: 0 8px 20px rgba(23,43,99,.16);
+            font-size: 12px; color: #5a6485; display: flex; flex-direction: column; gap: 6px;
+        }
+        .pp-oj-diff-row { display: flex; align-items: center; gap: 6px; font-weight: 600; }
+        .pp-oj-diff-row select {
+            border: 1.5px solid #e3e8f7; border-radius: 8px; padding: 4px 6px;
+            font-size: 12px; background: #fafbff; color: #4a5578; font-family: inherit; cursor: pointer;
+        }
+        .pp-oj-diff-row select:focus { outline: none; border-color: #4f7cff; }
+        /* 洛谷导入面板：标签/难度选项 */
+        .pp-luogu-opts {
+            display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center;
+            margin: 2px 0 10px; font-size: 12.5px; color: #4a5578; font-weight: 600;
+        }
+        .pp-luogu-opt { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
+        .pp-luogu-opt input[type=checkbox] { width: 15px; height: 15px; accent-color: #4f7cff; cursor: pointer; }
+        .pp-luogu-opt select {
+            border: 1.5px solid #e3e8f7; border-radius: 8px; padding: 4px 6px;
+            font-size: 12px; background: #fafbff; color: #4a5578; font-family: inherit; cursor: pointer;
+        }
+        .pp-luogu-opt select:focus { outline: none; border-color: #4f7cff; }
         /* 洛谷导入 */
         .pp-luogu { background: linear-gradient(135deg, #f7b733, #fc4a1a); }
         .pp-luogu-panel { display: none; margin-top: 10px; padding: 12px; background: #fff; border: 1px solid #e9edf9; border-radius: 12px; }
@@ -801,6 +1186,8 @@
         .pp-settings-row label { min-width: 76px; color: #5a6485; font-weight: 600; }
         .pp-settings-row input[type=number] { width: 64px; padding: 5px 8px; border: 1.5px solid #e3e8f7; border-radius: 8px; font-size: 13px; }
         .pp-settings-row input[type=number]:focus { outline: none; border-color: #4f7cff; }
+        .pp-settings-row select { width: 104px; padding: 5px 8px; border: 1.5px solid #e3e8f7; border-radius: 8px; font-size: 13px; background: #fafbff; color: #4a5578; font-family: inherit; cursor: pointer; }
+        .pp-settings-row select:focus { outline: none; border-color: #4f7cff; }
         .pp-settings-row input[type=checkbox] { width: 17px; height: 17px; accent-color: #4f7cff; }
         .pp-settings-row .unit { color: #9aa3bf; font-size: 12px; }
         /* 底部统计 */
@@ -828,6 +1215,127 @@
             pointer-events: none; font-weight: 600;
         }
         .pp-toast.show { opacity: 1; transform: translateY(0) scale(1); }
+
+        /* ============ 深色模式（data-theme="dark" 时覆盖） ============ */
+        .pp-container[data-theme="dark"] .pp-panel {
+            background: #1d2129; border-color: rgba(255,255,255,.08);
+            box-shadow: 0 24px 60px rgba(0,0,0,.5), 0 8px 20px rgba(0,0,0,.35);
+        }
+        .pp-container[data-theme="dark"] .pp-tabs { background: #161a21; border-bottom-color: #2a2f3a; }
+        .pp-container[data-theme="dark"] .pp-tab { color: #7c86a5; }
+        .pp-container[data-theme="dark"] .pp-tab:hover { color: #6f9bff; }
+        .pp-container[data-theme="dark"] .pp-tab.active { color: #6f9bff; border-bottom-color: #6f9bff; }
+        .pp-container[data-theme="dark"] .pp-tab-badge { background: #333b4b; color: #a3adc7; }
+        .pp-container[data-theme="dark"] .pp-tab-badge.urgent { background: #FE4C61; color: #fff; }
+        .pp-container[data-theme="dark"] .pp-memo-form { border-bottom-color: #2a2f3a; }
+        .pp-container[data-theme="dark"] .pp-memo-item { background: #161a21; border-color: #2a2f3a; box-shadow: 0 2px 6px rgba(0,0,0,.25); }
+        .pp-container[data-theme="dark"] .pp-memo-item:hover { border-color: #3a4252; }
+        .pp-container[data-theme="dark"] .pp-memo-item.urgent { background: linear-gradient(90deg, #2a1a1e, #161a21); }
+        .pp-container[data-theme="dark"] .pp-memo-text { color: #e6e8ee; }
+        .pp-container[data-theme="dark"] .pp-memo-time { color: #7c86a5; }
+        .pp-container[data-theme="dark"] .pp-body::-webkit-scrollbar-thumb { background: #343b4b; }
+        .pp-container[data-theme="dark"] .pp-body::-webkit-scrollbar-thumb:hover { background: #454f63; }
+        .pp-container[data-theme="dark"] .pp-form { border-bottom-color: #2a2f3a; }
+        .pp-container[data-theme="dark"] .pp-search-row { border-bottom-color: #2a2f3a; }
+        .pp-container[data-theme="dark"] .pp-form-group label { color: #a3adc7; }
+        .pp-container[data-theme="dark"] .pp-input { background: #161a21; border-color: #2a2f3a; color: #e6e8ee; }
+        .pp-container[data-theme="dark"] .pp-input:hover { border-color: #3a4252; }
+        .pp-container[data-theme="dark"] .pp-input:focus { border-color: #6f9bff; background: #1a1f28; box-shadow: 0 0 0 3.5px rgba(111,155,255,.18); }
+        .pp-container[data-theme="dark"] .pp-item { background: #161a21; border-color: #2a2f3a; box-shadow: 0 2px 6px rgba(0,0,0,.25); }
+        .pp-container[data-theme="dark"] .pp-item:hover { border-color: #3a4252; box-shadow: 0 6px 14px rgba(0,0,0,.35); }
+        .pp-container[data-theme="dark"] .pp-item.understood { background: #13171e; border-left-color: #FFC116; }
+        .pp-container[data-theme="dark"] .pp-item.timing { background: linear-gradient(90deg, #15241b, #161a21); box-shadow: 0 2px 8px rgba(82,196,26,.18); }
+        .pp-container[data-theme="dark"] .pp-time-badge { color: #a3adc7; background: #262c38; }
+        .pp-container[data-theme="dark"] .pp-toolbar { border-top-color: #2a2f3a; }
+        .pp-container[data-theme="dark"] .pp-tool-note { color: #c29bf5; border-color: #4b3a68; background: #221b30; }
+        .pp-container[data-theme="dark"] .pp-tool-note:hover { background: #2b2140; border-color: #6a4f92; }
+        .pp-container[data-theme="dark"] .pp-tool-note.has-note { color: #fff; border-color: #7b3fd4; background: linear-gradient(135deg, #a05ce4, #7b3fd4); }
+        .pp-container[data-theme="dark"] .pp-tool-color { color: #5ecfc0; border-color: #2a524a; background: #122522; }
+        .pp-container[data-theme="dark"] .pp-tool-color:hover { background: #16302c; border-color: #3a7a6d; }
+        .pp-container[data-theme="dark"] .pp-tool-color.has-color { color: #fff; border-color: #2f9e8f; background: linear-gradient(135deg, #3fb8a6, #2f9e8f); }
+        .pp-container[data-theme="dark"] .pp-tool-timer { color: #7fa8f2; border-color: #2b3f5c; background: #131c2c; }
+        .pp-container[data-theme="dark"] .pp-tool-timer:hover { background: #182540; border-color: #3f5f8c; }
+        .pp-container[data-theme="dark"] .pp-tool-timer.running { color: #fff; border-color: #1e9e63; background: linear-gradient(135deg, #2bb673, #1e9e63); }
+        .pp-container[data-theme="dark"] .pp-tool-timer.break-phase { color: #fff; border-color: #e67e22; background: linear-gradient(135deg, #f39c11, #e67e22); }
+        .pp-container[data-theme="dark"] .pp-tool-pin { color: #f0b04d; border-color: #52402a; background: #241c10; }
+        .pp-container[data-theme="dark"] .pp-tool-pin:hover { background: #312a18; border-color: #8a6a30; }
+        .pp-container[data-theme="dark"] .pp-tool-pin.pinned { color: #fff; border-color: #e67e22; background: linear-gradient(135deg, #f7b733, #e67e22); }
+        .pp-container[data-theme="dark"] .pp-tool-move { color: #a3adc7; border-color: #333b4b; background: #1a1f28; }
+        .pp-container[data-theme="dark"] .pp-tool-move:hover { color: #6f9bff; border-color: #3a4a6b; background: #182540; }
+        .pp-container[data-theme="dark"] .pp-timer-stop { border-color: #6b3a40; background: #2a1a1e; color: #ff8a8f; }
+        .pp-container[data-theme="dark"] .pp-timer-stop:hover { border-color: #a05058; background: #352024; }
+        .pp-container[data-theme="dark"] .pp-note-editor textarea { background: #161a21; border-color: #2a2f3a; color: #e6e8ee; }
+        .pp-container[data-theme="dark"] .pp-note-editor textarea:focus { border-color: #a05ce4; background: #1a1f28; box-shadow: 0 0 0 3px rgba(160,92,228,.2); }
+        .pp-container[data-theme="dark"] .pp-note-view { color: #c29bf5; background: #221b30; border-color: #3a2f50; }
+        .pp-container[data-theme="dark"] .pp-note-view:hover { border-color: #5a4680; background: #2b2140; }
+        .pp-container[data-theme="dark"] .pp-empty { color: #7c86a5; }
+        .pp-container[data-theme="dark"] .pp-done-summary { color: #a3adc7; background: #161a21; border-bottom-color: #2a2f3a; }
+        .pp-container[data-theme="dark"] .pp-done-summary b { color: #6f9bff; }
+        .pp-container[data-theme="dark"] .pp-done-item { background: #161a21; border-color: #2a2f3a; box-shadow: 0 2px 6px rgba(0,0,0,.25); }
+        .pp-container[data-theme="dark"] .pp-done-item:hover { border-color: #3a4252; }
+        .pp-container[data-theme="dark"] .pp-done-meta { color: #7c86a5; }
+        .pp-container[data-theme="dark"] .pp-done-note { color: #c29bf5; background: #221b30; border-color: #3a2f50; }
+        .pp-container[data-theme="dark"] .pp-ov-card { background: #161a21; border-color: #2a2f3a; }
+        .pp-container[data-theme="dark"] .pp-ov-label { color: #7c86a5; }
+        .pp-container[data-theme="dark"] .pp-goal-card { background: linear-gradient(135deg, #182231, #1c241a); border-color: #2c3a52; box-shadow: 0 2px 6px rgba(0,0,0,.2); }
+        .pp-container[data-theme="dark"] .pp-goal-card.done { background: linear-gradient(135deg, #15251d, #17251d); border-color: #2c4a38; }
+        .pp-container[data-theme="dark"] .pp-goal-title { color: #a3adc7; }
+        .pp-container[data-theme="dark"] .pp-goal-num { color: #6f9bff; }
+        .pp-container[data-theme="dark"] .pp-goal-card.done .pp-goal-num { color: #52c41a; }
+        .pp-container[data-theme="dark"] .pp-goal-track { background: #2a2f3a; }
+        .pp-container[data-theme="dark"] .pp-chart-card { background: #161a21; border-color: #2a2f3a; box-shadow: 0 2px 6px rgba(0,0,0,.25); }
+        .pp-container[data-theme="dark"] .pp-chart-title { color: #a3adc7; }
+        .pp-container[data-theme="dark"] .pp-chart-title .pp-chart-sub { color: #7c86a5; }
+        .pp-container[data-theme="dark"] .pp-legend { color: #7c86a5; }
+        .pp-container[data-theme="dark"] .pp-legend-block { color: #7c86a5; }
+        .pp-container[data-theme="dark"] .pp-diff-track { background: #2a2f3a; }
+        .pp-container[data-theme="dark"] .pp-diff-count { color: #a3adc7; }
+        .pp-container[data-theme="dark"] .pp-luogu-panel { background: #161a21; border-color: #2a2f3a; }
+        .pp-container[data-theme="dark"] .pp-luogu-status { color: #a3adc7; }
+        .pp-container[data-theme="dark"] .pp-backup { border-top-color: #2a2f3a; background: #161a21; }
+        .pp-container[data-theme="dark"] .pp-backup-title { color: #a3adc7; }
+        .pp-container[data-theme="dark"] .pp-backup-note { color: #7c86a5; }
+        .pp-container[data-theme="dark"] .pp-settings-toggle { background: #1a1f28; border-color: #333b4b; color: #a3adc7; }
+        .pp-container[data-theme="dark"] .pp-settings-toggle:hover { border-color: #6f9bff; color: #6f9bff; }
+        .pp-container[data-theme="dark"] .pp-settings { background: #161a21; border-color: #2a2f3a; box-shadow: inset 0 1px 3px rgba(0,0,0,.3); }
+        .pp-container[data-theme="dark"] .pp-settings-row label { color: #a3adc7; }
+        .pp-container[data-theme="dark"] .pp-settings-row input[type=number], .pp-container[data-theme="dark"] .pp-settings-row select { background: #161a21; border-color: #2a2f3a; color: #e6e8ee; }
+        .pp-container[data-theme="dark"] .pp-settings-row select { background: #1a1f28; }
+        .pp-container[data-theme="dark"] .pp-settings-row input[type=number]:focus, .pp-container[data-theme="dark"] .pp-settings-row select:focus { border-color: #6f9bff; }
+        .pp-container[data-theme="dark"] .pp-settings-row .unit { color: #7c86a5; }
+        .pp-container[data-theme="dark"] .pp-footer { background: #161a21; border-top-color: #2a2f3a; }
+        .pp-container[data-theme="dark"] .pp-stat-card { background: #161a21; border-color: #2a2f3a; }
+        .pp-container[data-theme="dark"] .pp-stat-label { color: #7c86a5; }
+        .pp-container[data-theme="dark"] .pp-stat-value { color: #6f9bff; }
+        .pp-container[data-theme="dark"] .pp-stat-value.completed { color: #52c41a; }
+        .pp-container[data-theme="dark"] .pp-stat-value.time { color: #f39c11; }
+        .pp-container[data-theme="dark"] .pp-oj-btn { box-shadow: 0 6px 16px rgba(0,0,0,.4); }
+        .pp-container[data-theme="dark"] .pp-oj-tag-toggle {
+            background: #1a1f28; color: #a3adc7; border-color: #333b4b;
+            box-shadow: 0 2px 6px rgba(0,0,0,.3);
+        }
+        .pp-container[data-theme="dark"] .pp-oj-tag-toggle:hover { border-color: #6f9bff; color: #6f9bff; }
+        .pp-container[data-theme="dark"] .pp-oj-tag-toggle.on {
+            color: #fff; border-color: #52c41a;
+            background: linear-gradient(135deg, #52c41a, #2fa557);
+        }
+        .pp-container[data-theme="dark"] .pp-oj-diff-panel {
+            background: #161a21; border-color: #2a2f3a; color: #a3adc7;
+            box-shadow: 0 8px 20px rgba(0,0,0,.45);
+        }
+        .pp-container[data-theme="dark"] .pp-oj-diff-row select {
+            background: #1a1f28; border-color: #2a2f3a; color: #e6e8ee;
+        }
+        .pp-container[data-theme="dark"] .pp-oj-diff-row select:focus { border-color: #6f9bff; }
+        .pp-container[data-theme="dark"] .pp-luogu-opts { color: #a3adc7; }
+        .pp-container[data-theme="dark"] .pp-luogu-opt select {
+            background: #1a1f28; border-color: #2a2f3a; color: #e6e8ee;
+        }
+        .pp-container[data-theme="dark"] .pp-luogu-opt select:focus { border-color: #6f9bff; }
+        /* 深色模式下难度色/图例色稍作提亮，保证可读性 */
+        .pp-container[data-theme="dark"] .pp-ov-value { color: #6f9bff; }
+        .pp-container[data-theme="dark"] .pp-ov-value.green { color: #52c41a; }
+        .pp-container[data-theme="dark"] .pp-ov-value.orange { color: #f39c11; }
     `;
     document.head.appendChild(style);
 
@@ -844,34 +1352,33 @@
     const panel = document.createElement('div');
     panel.className = 'pp-panel';
     panel.innerHTML = `
-        <div class="pp-header">
-            做题计划
-        </div>
+        <div class="pp-header" data-i18n="app.name">做题计划</div>
         <div class="pp-tabs">
-            <button class="pp-tab active" data-tab="active">进行中</button>
-            <button class="pp-tab" data-tab="done">已完成</button>
-            <button class="pp-tab" data-tab="stats">统计</button>
+            <button class="pp-tab active" data-tab="active" data-i18n="tab.active">进行中</button>
+            <button class="pp-tab" data-tab="done" data-i18n="tab.done">已完成</button>
+            <button class="pp-tab" data-tab="stats" data-i18n="tab.stats">统计</button>
+            <button class="pp-tab" data-tab="memo"><span data-i18n="tab.memo">备忘</span><span class="pp-tab-badge" id="pp-memo-count">0</span></button>
         </div>
         <div class="pp-body">
             <div class="pp-view active" data-view="active">
                 <div class="pp-form">
                     <div class="pp-form-group">
-                        <label for="pp-url">题目网址</label>
+                        <label for="pp-url" data-i18n="form.urlLabel">题目网址</label>
                         <input type="text" id="pp-url" class="pp-input" placeholder="https://example.com/problem/123">
                     </div>
                     <div class="pp-form-group">
-                        <label for="pp-name">题目名称</label>
-                        <input type="text" id="pp-name" class="pp-input" placeholder="默认使用当前页面标题">
+                        <label for="pp-name" data-i18n="form.nameLabel">题目名称</label>
+                        <input type="text" id="pp-name" class="pp-input" data-i18n-placeholder="form.namePlaceholder" placeholder="默认使用当前页面标题">
                     </div>
                     <div class="pp-form-group">
-                        <label>选择颜色</label>
+                        <label data-i18n="form.colorLabel">选择颜色</label>
                         <div class="pp-color-selection" id="pp-colors"></div>
                     </div>
-                    <button class="pp-add-btn" id="pp-add">添加题目到计划</button>
+                    <button class="pp-add-btn" id="pp-add" data-i18n="form.addBtn">添加题目到计划</button>
                 </div>
                 <div class="pp-search-row">
-                    <input type="text" id="pp-search" class="pp-input" placeholder="🔍 搜索题目名 / 备注 / 网址…">
-                    <button class="pp-btn pp-understand pp-random-btn" id="pp-random" title="从未理解题目中随机抽一道">🎲 随机一题</button>
+                    <input type="text" id="pp-search" class="pp-input" data-i18n-placeholder="search.placeholder" placeholder="🔍 搜索题目名 / 备注 / 网址…">
+                    <button class="pp-btn pp-understand pp-random-btn" id="pp-random" data-i18n="search.randomBtn" data-i18n-title="search.randomTitle" title="从未理解题目中随机抽一道">🎲 随机一题</button>
                 </div>
                 <div class="pp-list" id="pp-list"></div>
             </div>
@@ -882,59 +1389,94 @@
             <div class="pp-view" data-view="stats">
                 <div class="pp-stats-charts" id="pp-stats-charts"></div>
             </div>
+            <div class="pp-view" data-view="memo">
+                <div class="pp-memo-form">
+                    <input type="text" id="pp-memo-input" class="pp-input" data-i18n-placeholder="memo.placeholder" placeholder="输入备忘内容…">
+                    <button class="pp-btn pp-complete" id="pp-memo-add" data-i18n="memo.addBtn">添加</button>
+                </div>
+                <div class="pp-list" id="pp-memo-list"></div>
+            </div>
         </div>
         <div class="pp-backup">
-            <div class="pp-backup-title">💾 数据备份</div>
+            <div class="pp-backup-title" data-i18n="backup.title">💾 数据备份</div>
             <div class="pp-backup-buttons">
-                <button class="pp-btn-backup pp-export" id="pp-export">导出数据</button>
-                <button class="pp-btn-backup pp-import" id="pp-import">导入数据</button>
-                <button class="pp-btn-backup pp-clear" id="pp-clear">清空数据</button>
-                <button class="pp-btn-backup pp-luogu" id="pp-import-luogu">📥 洛谷导入</button>
-                <button class="pp-settings-toggle" id="pp-settings-toggle">⚙ 设置</button>
+                <button class="pp-btn-backup pp-export" id="pp-export" data-i18n="backup.export">导出数据</button>
+                <button class="pp-btn-backup pp-import" id="pp-import" data-i18n="backup.import">导入数据</button>
+                <button class="pp-btn-backup pp-clear" id="pp-clear" data-i18n="backup.clear">清空数据</button>
+                <button class="pp-btn-backup pp-luogu" id="pp-import-luogu" data-i18n="backup.luogu">📥 洛谷导入</button>
+                <button class="pp-settings-toggle" id="pp-settings-toggle" data-i18n="backup.settings">⚙ 设置</button>
             </div>
             <div class="pp-luogu-panel" id="pp-luogu-panel">
                 <div class="pp-form-group" style="margin-bottom:8px;">
-                    <label for="pp-luogu-url" style="font-size:12px;">洛谷题单 / 做题计划链接</label>
+                    <label for="pp-luogu-url" style="font-size:12px;" data-i18n="luogu.urlLabel">洛谷题单 / 做题计划链接</label>
                     <input type="text" id="pp-luogu-url" class="pp-input" placeholder="https://www.luogu.com.cn/training/xxx">
                 </div>
-                <button class="pp-btn-backup pp-export" id="pp-luogu-start" style="width:100%;margin-top:0;">开始导入题单</button>
-                <button class="pp-btn-backup pp-import" id="pp-home-import" style="width:100%;margin-top:6px;">从当前洛谷主页任务计划导入</button>
+                <div class="pp-luogu-opts">
+                    <label class="pp-luogu-opt" data-i18n-title="luogu.tagsTitle" title="导入时自动获取题目标签写入备注">
+                        <input type="checkbox" id="pp-import-tags"> <span data-i18n="luogu.tagsLabel">🏷 添加标签</span>
+                    </label>
+                    <label class="pp-luogu-opt" data-i18n-title="luogu.diffTitle" title="只导入该难度范围内的题目">
+                        <span data-i18n="luogu.diffLabel">难度</span>
+                        <select id="pp-import-diff-min"></select>
+                        <span>~</span>
+                        <select id="pp-import-diff-max"></select>
+                    </label>
+                </div>
+                <button class="pp-btn-backup pp-export" id="pp-luogu-start" style="width:100%;margin-top:0;" data-i18n="luogu.start">开始导入题单</button>
+                <button class="pp-btn-backup pp-import" id="pp-home-import" style="width:100%;margin-top:6px;" data-i18n="luogu.homeImport">从当前洛谷主页任务计划导入</button>
                 <div class="pp-luogu-status" id="pp-luogu-status"></div>
             </div>
             <div class="pp-settings" id="pp-settings">
                 <div class="pp-settings-row">
-                    <label>专注时长</label>
+                    <label data-i18n="settings.focus">专注时长</label>
                     <input type="number" id="pp-focus-min" min="1" max="120">
-                    <span class="unit">分钟</span>
+                    <span class="unit" data-i18n="settings.minutes">分钟</span>
                 </div>
                 <div class="pp-settings-row">
-                    <label>休息时长</label>
+                    <label data-i18n="settings.break">休息时长</label>
                     <input type="number" id="pp-break-min" min="1" max="60">
-                    <span class="unit">分钟</span>
+                    <span class="unit" data-i18n="settings.minutes">分钟</span>
                 </div>
                 <div class="pp-settings-row">
-                    <label>自动休息</label>
+                    <label data-i18n="settings.autoBreak">自动休息</label>
                     <input type="checkbox" id="pp-auto-break">
-                    <span class="unit">专注结束后自动开始休息</span>
+                    <span class="unit" data-i18n="settings.autoBreakDesc">专注结束后自动开始休息</span>
                 </div>
                 <div class="pp-settings-row">
-                    <label>每日目标</label>
+                    <label data-i18n="settings.dailyGoal">每日目标</label>
                     <input type="number" id="pp-daily-goal" min="0" max="100">
-                    <span class="unit">题（0 = 不启用）</span>
+                    <span class="unit" data-i18n="settings.dailyGoalDesc">题（0 = 不启用）</span>
+                </div>
+                <div class="pp-settings-row">
+                    <label data-i18n="settings.theme">主题</label>
+                    <select id="pp-theme" data-i18n-title="settings.themeDesc" title="界面外观模式">
+                        <option value="auto" data-i18n="settings.themeAuto">跟随系统</option>
+                        <option value="light" data-i18n="settings.themeLight">浅色</option>
+                        <option value="dark" data-i18n="settings.themeDark">深色</option>
+                    </select>
+                    <span class="unit" data-i18n="settings.themeDesc">面板外观</span>
+                </div>
+                <div class="pp-settings-row">
+                    <label data-i18n="settings.lang">语言</label>
+                    <select id="pp-lang">
+                        <option value="auto" data-i18n="settings.langAuto">跟随系统</option>
+                        <option value="zh-CN" data-i18n="settings.langZh">中文</option>
+                        <option value="en" data-i18n="settings.langEn">English</option>
+                    </select>
                 </div>
             </div>
-            <div class="pp-backup-note" style="font-size:12px;color:#9aa3bf;margin-top:9px;font-style:italic;">
+            <div class="pp-backup-note" data-i18n="backup.note" style="font-size:12px;color:#9aa3bf;margin-top:9px;font-style:italic;">
                 导出包含进行中、已完成归档、备注、计时统计（v3 格式）
             </div>
         </div>
         <div class="pp-footer">
             <div class="pp-stats">
-                <div class="pp-stat-card"><span class="pp-stat-label">未理解</span><span class="pp-stat-value" id="pp-not-understood">0</span></div>
-                <div class="pp-stat-card"><span class="pp-stat-label">已理解</span><span class="pp-stat-value" id="pp-understood">0</span></div>
-                <div class="pp-stat-card"><span class="pp-stat-label">已完成</span><span class="pp-stat-value completed" id="pp-completed">0</span></div>
+                <div class="pp-stat-card"><span class="pp-stat-label" data-i18n="footer.notUnderstood">未理解</span><span class="pp-stat-value" id="pp-not-understood">0</span></div>
+                <div class="pp-stat-card"><span class="pp-stat-label" data-i18n="footer.understood">已理解</span><span class="pp-stat-value" id="pp-understood">0</span></div>
+                <div class="pp-stat-card"><span class="pp-stat-label" data-i18n="footer.completed">已完成</span><span class="pp-stat-value completed" id="pp-completed">0</span></div>
             </div>
             <div class="pp-stats">
-                <div class="pp-stat-card"><span class="pp-stat-label">累计专注</span><span class="pp-stat-value time" id="pp-total-time">0m</span></div>
+                <div class="pp-stat-card"><span class="pp-stat-label" data-i18n="footer.totalTime">累计专注</span><span class="pp-stat-value time" id="pp-total-time">0m</span></div>
             </div>
         </div>
         <input type="file" id="pp-file" accept=".json,application/json" style="display:none;">
@@ -993,7 +1535,7 @@
     function pickRandomProblem() {
         const candidates = problems.filter(p => !p.understood);
         if (!candidates.length) {
-            showToast('暂无未理解的题目 🎉', '#F39C11');
+            showToast(t('toast.noUnsolved'), '#F39C11');
             return;
         }
         const pick = candidates[Math.floor(Math.random() * candidates.length)];
@@ -1007,7 +1549,7 @@
             target.classList.add('pp-random-hit');
             setTimeout(() => target.classList.remove('pp-random-hit'), 2600);
         }
-        showToast('🎲 随机一题：' + pick.name, '#3498DB');
+        showToast(t('toast.randomPick', { name: pick.name }), '#3498DB');
     }
 
     function renderProblems() {
@@ -1015,13 +1557,13 @@
         updateCounters();
 
         if (problems.length === 0) {
-            list.innerHTML = '<div class="pp-empty"><span class="pp-empty-icon">📭</span><span class="pp-empty-text">暂无待做题目，请添加题目到计划中</span></div>';
+            list.innerHTML = '<div class="pp-empty"><span class="pp-empty-icon">📭</span><span class="pp-empty-text">' + t('empty.active') + '</span></div>';
             return;
         }
 
         const filtered = filteredProblems();
         if (filtered.length === 0) {
-            list.innerHTML = '<div class="pp-empty"><span class="pp-empty-icon">🔍</span><span class="pp-empty-text">没有匹配「' + searchQuery + '」的题目</span></div>';
+            list.innerHTML = '<div class="pp-empty"><span class="pp-empty-icon">🔍</span><span class="pp-empty-text">' + t('empty.noMatch', { q: searchQuery }) + '</span></div>';
             return;
         }
 
@@ -1065,7 +1607,7 @@
             const timeBadge = document.createElement('span');
             timeBadge.className = 'pp-time-badge';
             timeBadge.textContent = '⏱ ' + formatDuration(problem.timeSpent);
-            timeBadge.title = '累计专注时长';
+            timeBadge.title = t('item.timeBadgeTitle');
             main.appendChild(timeBadge);
         }
 
@@ -1078,8 +1620,8 @@
         if (!problem.understood) {
             const understandBtn = document.createElement('button');
             understandBtn.className = 'pp-btn pp-understand pp-btn-sm';
-            understandBtn.textContent = '理解';
-            understandBtn.title = '标记为已理解（移至底部）';
+            understandBtn.textContent = t('item.understand');
+            understandBtn.title = t('item.understandTitle');
             understandBtn.addEventListener('click', (e) => {
                 e.preventDefault();
                 const idx = problems.findIndex(p => p.url === problem.url);
@@ -1094,11 +1636,11 @@
 
         const completeBtn = document.createElement('button');
         completeBtn.className = 'pp-btn pp-complete pp-btn-sm';
-        completeBtn.textContent = '完成';
-        completeBtn.title = '标记为已完成（移入归档）';
+        completeBtn.textContent = t('item.complete');
+        completeBtn.title = t('item.completeTitle');
         completeBtn.addEventListener('click', (e) => {
             e.preventDefault();
-            if (confirm(`确定要标记题目 "${problem.name}" 为已完成吗？`)) {
+            if (confirm(t('confirm.complete', { name: problem.name }))) {
                 const idx = problems.findIndex(p => p.url === problem.url);
                 if (idx !== -1) {
                     if (timerState && timerState.url === problem.url) stopTimer();
@@ -1117,12 +1659,12 @@
                     if (goal > 0) {
                         const todayDone = countOnDate(new Date());
                         if (todayDone >= goal) {
-                            showToast('🎯 今日目标 ' + goal + ' 题已达成！太棒了', '#F39C11');
+                            showToast(t('toast.goalDone', { g: goal }), '#F39C11');
                         } else {
-                            showToast('已归档 🎉 · 今日 ' + todayDone + '/' + goal, '#52C41A');
+                            showToast(t('toast.archived', { t: todayDone, g: goal }), '#52C41A');
                         }
                     } else {
-                        showToast('已归档 🎉', '#52C41A');
+                        showToast(t('toast.archivedPlain'), '#52C41A');
                     }
                 }
             }
@@ -1131,11 +1673,11 @@
 
         const giveupBtn = document.createElement('button');
         giveupBtn.className = 'pp-btn pp-giveup pp-btn-sm';
-        giveupBtn.textContent = '放弃';
-        giveupBtn.title = '放弃此题（不计入完成）';
+        giveupBtn.textContent = t('item.giveup');
+        giveupBtn.title = t('item.giveupTitle');
         giveupBtn.addEventListener('click', (e) => {
             e.preventDefault();
-            if (confirm(`确定要放弃题目 "${problem.name}" 吗？`)) {
+            if (confirm(t('confirm.giveup', { name: problem.name }))) {
                 const idx = problems.findIndex(p => p.url === problem.url);
                 if (idx !== -1) {
                     if (timerState && timerState.url === problem.url) stopTimer();
@@ -1155,8 +1697,8 @@
 
         const noteBtn = document.createElement('button');
         noteBtn.className = 'pp-tool-btn pp-tool-note';
-        noteBtn.textContent = '备注';
-        noteBtn.title = problem.notes ? '编辑备注（已展示在下方）' : '添加备注';
+        noteBtn.textContent = t('item.note');
+        noteBtn.title = problem.notes ? t('item.noteTitleEdit') : t('item.noteTitleAdd');
         if (problem.notes) noteBtn.classList.add('has-note');
         noteBtn.addEventListener('click', (e) => {
             e.preventDefault();
@@ -1167,8 +1709,8 @@
         // 改色按钮：展开颜色选择器，自定义题目颜色
         const colorBtn = document.createElement('button');
         colorBtn.className = 'pp-tool-btn pp-tool-color';
-        colorBtn.textContent = '颜色';
-        colorBtn.title = problem.customColor ? '修改自定义颜色（当前已设置）' : '自定义题目颜色（覆盖难度色）';
+        colorBtn.textContent = t('item.color');
+        colorBtn.title = problem.customColor ? t('item.colorTitleSet') : t('item.colorTitleCustom');
         if (problem.customColor) colorBtn.classList.add('has-color');
         colorBtn.addEventListener('click', (e) => {
             e.preventDefault();
@@ -1178,8 +1720,8 @@
 
         const timerBtn = document.createElement('button');
         timerBtn.className = 'pp-tool-btn pp-tool-timer pp-timer-btn';
-        timerBtn.textContent = '计时';
-        timerBtn.title = '番茄钟：开始 ' + settings.focusMinutes + ' 分钟专注';
+        timerBtn.textContent = t('item.timer');
+        timerBtn.title = t('item.timerTitle', { m: settings.focusMinutes });
         timerBtn.addEventListener('click', (e) => {
             e.preventDefault();
             if (timerState && timerState.url === problem.url && timerState.phase === 'break') {
@@ -1200,8 +1742,8 @@
 
         const stopBtn = document.createElement('button');
         stopBtn.className = 'pp-timer-stop';
-        stopBtn.textContent = '停止';
-        stopBtn.title = '停止计时（结算已专注时间）';
+        stopBtn.textContent = t('item.stop');
+        stopBtn.title = t('item.stopTitle');
         stopBtn.style.display = 'none';
         stopBtn.addEventListener('click', (e) => {
             e.preventDefault();
@@ -1211,8 +1753,8 @@
 
         const pinBtn = document.createElement('button');
         pinBtn.className = 'pp-tool-btn pp-tool-pin';
-        pinBtn.textContent = problem.pinned ? '已置顶' : '置顶';
-        pinBtn.title = problem.pinned ? '取消置顶' : '置顶（排在列表前面）';
+        pinBtn.textContent = problem.pinned ? t('item.pinned') : t('item.pin');
+        pinBtn.title = problem.pinned ? t('item.pinTitleUnpin') : t('item.pinTitle');
         if (problem.pinned) pinBtn.classList.add('pinned');
         pinBtn.addEventListener('click', (e) => {
             e.preventDefault();
@@ -1228,7 +1770,7 @@
         const upBtn = document.createElement('button');
         upBtn.className = 'pp-tool-btn pp-tool-move';
         upBtn.textContent = '▲';
-        upBtn.title = '上移';
+        upBtn.title = t('item.moveUp');
         upBtn.addEventListener('click', (e) => {
             e.preventDefault();
             moveProblem(problem.url, -1);
@@ -1238,7 +1780,7 @@
         const downBtn = document.createElement('button');
         downBtn.className = 'pp-tool-btn pp-tool-move';
         downBtn.textContent = '▼';
-        downBtn.title = '下移';
+        downBtn.title = t('item.moveDown');
         downBtn.addEventListener('click', (e) => {
             e.preventDefault();
             moveProblem(problem.url, 1);
@@ -1252,7 +1794,7 @@
             const noteView = document.createElement('div');
             noteView.className = 'pp-note-view';
             noteView.textContent = problem.notes;
-            noteView.title = '点击可编辑备注';
+            noteView.title = t('item.noteViewTitle');
             noteView.addEventListener('click', (e) => {
                 e.preventDefault();
                 toggleNoteEditor(item, problem);
@@ -1271,7 +1813,7 @@
         const target = idx + dir;
         if (target < 0 || target >= sorted.length) return;
         if (sorted[idx].pinned !== sorted[target].pinned) {
-            showToast('置顶与未置顶不能互相移动', '#FE4C61');
+            showToast(t('toast.moveRestricted'), '#FE4C61');
             return;
         }
         [sorted[idx], sorted[target]] = [sorted[target], sorted[idx]];
@@ -1302,13 +1844,13 @@
                 timerBtn.classList.add('running');
                 timerBtn.classList.toggle('break-phase', timerState.phase === 'break');
                 timerBtn.title = timerState.phase === 'focus'
-                    ? (timerState.running ? '专注中…点击暂停' : '已暂停，点击继续')
-                    : '休息中…点击跳过';
+                    ? (timerState.running ? t('timer.focusPause') : t('timer.paused'))
+                    : t('timer.break');
             } else {
                 stopBtn.style.display = 'none';
-                timerBtn.textContent = '计时';
+                timerBtn.textContent = t('item.timer');
                 timerBtn.classList.remove('running', 'break-phase');
-                timerBtn.title = '番茄钟：开始 ' + settings.focusMinutes + ' 分钟专注';
+                timerBtn.title = t('item.timerTitle', { m: settings.focusMinutes });
             }
         });
     }
@@ -1345,8 +1887,8 @@
         // 恢复默认（清除自定义颜色，回到难度色/默认色）
         const reset = document.createElement('button');
         reset.className = 'pp-btn pp-giveup pp-btn-sm';
-        reset.textContent = '恢复默认';
-        reset.title = '清除自定义颜色';
+        reset.textContent = t('item.resetColor');
+        reset.title = t('item.resetColorTitle');
         reset.addEventListener('click', () => {
             const idx = problems.findIndex(p => p.url === problem.url);
             if (idx !== -1) {
@@ -1372,10 +1914,10 @@
         const editor = document.createElement('div');
         editor.className = 'pp-note-editor';
         editor.innerHTML = `
-            <textarea placeholder="记录思路、坑点、题解链接…"></textarea>
+            <textarea placeholder="${t('note.placeholder')}"></textarea>
             <div class="pp-note-actions">
-                <button class="pp-btn pp-complete" type="button">保存</button>
-                <button class="pp-btn pp-giveup" type="button">取消</button>
+                <button class="pp-btn pp-complete" type="button">${t('note.save')}</button>
+                <button class="pp-btn pp-giveup" type="button">${t('note.cancel')}</button>
             </div>
         `;
         editor.querySelector('textarea').value = problem.notes || '';
@@ -1384,7 +1926,7 @@
             if (idx !== -1) {
                 problems[idx].notes = editor.querySelector('textarea').value.trim();
                 saveData();
-                showToast('备注已保存', '#9D3DCF');
+                showToast(t('toast.noteSaved'), '#9D3DCF');
             }
             renderProblems();
         });
@@ -1402,12 +1944,12 @@
 
         const totalTime = archive.reduce((s, a) => s + (a.timeSpent || 0), 0);
         summary.innerHTML = `
-            <span>共 <b>${archive.length}</b> 条完成记录</span>
-            <span>归档专注 <b>${formatDuration(totalTime)}</b></span>
+            <span>${t('archive.summary', { n: '<b>' + archive.length + '</b>' })}</span>
+            <span>${t('archive.time', { d: '<b>' + formatDuration(totalTime) + '</b>' })}</span>
         `;
 
         if (archive.length === 0) {
-            list.innerHTML = '<div class="pp-empty"><span class="pp-empty-icon">🗂</span><span class="pp-empty-text">暂无完成记录，做完题目会自动归档到这里</span></div>';
+            list.innerHTML = '<div class="pp-empty"><span class="pp-empty-icon">🗂</span><span class="pp-empty-text">' + t('archive.empty') + '</span></div>';
             return;
         }
 
@@ -1441,9 +1983,9 @@
         const meta = document.createElement('div');
         meta.className = 'pp-done-meta';
         meta.innerHTML =
-            '<span>✅ 完成于 ' + formatDateTime(a.completedDate) + '</span>' +
-            (a.timeSpent > 0 ? '<span>⏱ 专注 ' + formatDuration(a.timeSpent) + '</span>' : '') +
-            '<span>📅 添加于 ' + formatDate(a.addedDate) + '</span>';
+            '<span>' + t('archive.completedAt', { d: formatDateTime(a.completedDate) }) + '</span>' +
+            (a.timeSpent > 0 ? '<span>' + t('archive.focus', { d: formatDuration(a.timeSpent) }) + '</span>' : '') +
+            '<span>' + t('archive.addedAt', { d: formatDate(a.addedDate) }) + '</span>';
         main.appendChild(meta);
 
         if (a.notes) {
@@ -1460,10 +2002,10 @@
 
         const restoreBtn = document.createElement('button');
         restoreBtn.className = 'pp-btn pp-restore pp-btn-sm';
-        restoreBtn.textContent = '恢复';
-        restoreBtn.title = '恢复到进行中列表';
+        restoreBtn.textContent = t('archive.restore');
+        restoreBtn.title = t('archive.restoreTitle');
         restoreBtn.addEventListener('click', () => {
-            if (confirm(`将 "${a.name}" 恢复到进行中列表？`)) {
+            if (confirm(t('confirm.restore', { name: a.name }))) {
                 restoreArchiveItem(a);
             }
         });
@@ -1471,16 +2013,16 @@
 
         const delBtn = document.createElement('button');
         delBtn.className = 'pp-btn pp-del-record pp-btn-sm';
-        delBtn.textContent = '删除';
-        delBtn.title = '永久删除该条完成记录';
+        delBtn.textContent = t('archive.delete');
+        delBtn.title = t('archive.deleteTitle');
         delBtn.addEventListener('click', () => {
-            if (confirm(`永久删除记录 "${a.name}"？（不影响已完成计数）`)) {
+            if (confirm(t('confirm.deleteRecord', { name: a.name }))) {
                 const idx = archive.findIndex(x => x.url === a.url && x.completedDate === a.completedDate);
                 if (idx !== -1) {
                     archive.splice(idx, 1);
                     saveArchive();
                     renderArchiveList();
-                    showToast('记录已删除', '#FE4C61');
+                    showToast(t('toast.recordDeleted'), '#FE4C61');
                 }
             }
         });
@@ -1499,7 +2041,7 @@
                 saveArchive();
                 renderArchiveList();
             }
-            showToast('该题目已在进行中，仅移除归档记录', '#F39C11');
+            showToast(t('toast.alreadyActive'), '#F39C11');
             return;
         }
         const idx = archive.findIndex(x => x.url === a.url && x.completedDate === a.completedDate);
@@ -1516,7 +2058,7 @@
             saveData();
             renderArchiveList();
             renderProblems();
-            showToast('已恢复到进行中', '#52C41A');
+            showToast(t('toast.restored'), '#52C41A');
         }
     }
 
@@ -1564,10 +2106,10 @@
         // 总览卡片
         let html = `
             <div class="pp-ov-grid">
-                <div class="pp-ov-card"><span class="pp-ov-value">${completedCount}</span><span class="pp-ov-label">总完成</span></div>
-                <div class="pp-ov-card"><span class="pp-ov-value green">${todayCount}</span><span class="pp-ov-label">今日完成</span></div>
-                <div class="pp-ov-card"><span class="pp-ov-value orange">${calcStreak()}</span><span class="pp-ov-label">连续打卡(天)</span></div>
-                <div class="pp-ov-card"><span class="pp-ov-value">${formatDuration(totalTime)}</span><span class="pp-ov-label">累计专注</span></div>
+                <div class="pp-ov-card"><span class="pp-ov-value">${completedCount}</span><span class="pp-ov-label">${t('stats.total')}</span></div>
+                <div class="pp-ov-card"><span class="pp-ov-value green">${todayCount}</span><span class="pp-ov-label">${t('stats.today')}</span></div>
+                <div class="pp-ov-card"><span class="pp-ov-value orange">${calcStreak()}</span><span class="pp-ov-label">${t('stats.streak')}</span></div>
+                <div class="pp-ov-card"><span class="pp-ov-value">${formatDuration(totalTime)}</span><span class="pp-ov-label">${t('stats.totalTime')}</span></div>
             </div>
         `;
 
@@ -1580,8 +2122,8 @@
             html += `
                 <div class="pp-goal-card ${done ? 'done' : ''}">
                     <div class="pp-goal-head">
-                        <span class="pp-goal-title">🎯 今日目标</span>
-                        <span class="pp-goal-num">${todayCount} / ${goal} 题${done ? ' · 达成 🎉' : ''}</span>
+                        <span class="pp-goal-title">${t('stats.goalTitle')}</span>
+                        <span class="pp-goal-num">${t('stats.goalProgress', { t: todayCount, g: goal })}${done ? t('stats.goalDone') : ''}</span>
                     </div>
                     <div class="pp-goal-track"><div class="pp-goal-fill" style="width:${pct}%"></div></div>
                 </div>
@@ -1598,15 +2140,16 @@
         }
         const maxCount = Math.max(1, ...days.map(x => x.count));
         const barW = 100 / days.length;
+        const emptyBarColor = container.getAttribute('data-theme') === 'dark' ? '#2a2f3a' : '#e8ecf7';
         html += `
             <div class="pp-chart-card">
-                <div class="pp-chart-title">14 天完成趋势<span class="pp-chart-sub">每天完成的题目数</span></div>
+                <div class="pp-chart-title">${t('stats.trendTitle')}<span class="pp-chart-sub">${t('stats.trendSub')}</span></div>
                 <svg class="pp-chart-svg" viewBox="0 0 100 56" preserveAspectRatio="none" style="height:120px">
                     ${days.map((x, i) => {
                         const h = Math.max(2, (x.count / maxCount) * 46);
                         const y = 52 - h;
-                        return `<rect x="${i * barW + barW * 0.15}" y="${y}" width="${barW * 0.7}" height="${h}" rx="1.5" fill="${x.count > 0 ? '#4f7cff' : '#e8ecf7'}">
-                            <title>${x.date.getMonth() + 1}月${x.date.getDate()}日：完成 ${x.count} 题</title>
+                        return `<rect x="${i * barW + barW * 0.15}" y="${y}" width="${barW * 0.7}" height="${h}" rx="1.5" fill="${x.count > 0 ? '#4f7cff' : emptyBarColor}">
+                            <title>${t('stats.trendTooltip', { m: x.date.getMonth() + 1, d: x.date.getDate(), n: x.count })}</title>
                         </rect>`;
                     }).join('')}
                 </svg>
@@ -1624,18 +2167,18 @@
         const maxDiffCount = Math.max(1, ...diffCounts, diffNone);
         html += `
             <div class="pp-chart-card">
-                <div class="pp-chart-title">难度分布<span class="pp-chart-sub">已完成题目 · 洛谷难度</span></div>
+                <div class="pp-chart-title">${t('stats.diffTitle')}<span class="pp-chart-sub">${t('stats.diffSub')}</span></div>
                 <div class="pp-diff-bars">
                     ${DIFFICULTY_META.map((m, i) => `
                         <div class="pp-diff-row">
-                            <span class="pp-diff-label" style="color:${m.color}">${m.label}</span>
+                            <span class="pp-diff-label" style="color:${m.color}">${difficultyLabel(i)}</span>
                             <div class="pp-diff-track"><div class="pp-diff-fill" style="width:${(diffCounts[i] / maxDiffCount) * 100}%;background:${m.color}"></div></div>
                             <span class="pp-diff-count">${diffCounts[i]}</span>
                         </div>`).join('')}
                     ${diffNone > 0 ? `
                         <div class="pp-diff-row">
-                            <span class="pp-diff-label" style="color:#9aa3bf">暂无评定</span>
-                            <div class="pp-diff-track"><div class="pp-diff-fill" style="width:${(diffNone / maxDiffCount) * 100}%;background:#d5dbea"></div></div>
+                            <span class="pp-diff-label" style="color:${container.getAttribute('data-theme') === 'dark' ? '#7c86a5' : '#9aa3bf'}">${t('stats.diffNone')}</span>
+                            <div class="pp-diff-track"><div class="pp-diff-fill" style="width:${(diffNone / maxDiffCount) * 100}%;background:${container.getAttribute('data-theme') === 'dark' ? '#3a4252' : '#d5dbea'}"></div></div>
                             <span class="pp-diff-count">${diffNone}</span>
                         </div>` : ''}
                 </div>
@@ -1652,8 +2195,9 @@
         const startDate = new Date(today);
         startDate.setDate(startDate.getDate() - (weeks - 1) * 7 - 6);
         const depthLevel = (n) => n <= 0 ? 0 : n <= 2 ? 1 : n <= 4 ? 2 : n <= 6 ? 3 : n <= 8 ? 4 : 5;
+        const emptyHeatColor = container.getAttribute('data-theme') === 'dark' ? '#262c38' : '#ebedf0';
         const heatCellColor = (n, maxDiff) => {
-            if (n <= 0) return '#ebedf0';
+            if (n <= 0) return emptyHeatColor;
             // 基础色：当天最难题的难度色；无难度记录时用主题蓝
             const base = maxDiff >= 0 ? difficultyColor(maxDiff) : '#4f7cff';
             // 七档色深：1~2 最浅 … 9+ 最深
@@ -1669,7 +2213,9 @@
                 const cnt = countOnDate(date);
                 const maxDiff = maxDifficultyOnDate(date);
                 cells += `<rect x="${w * (cell + gap)}" y="${d * (cell + gap)}" width="${cell}" height="${cell}" rx="2" fill="${heatCellColor(cnt, maxDiff)}">
-                    <title>${date.getMonth() + 1}月${date.getDate()}日：完成 ${cnt} 题${maxDiff >= 0 ? ' · 最难 ' + difficultyLabel(maxDiff) : ''}</title>
+                    <title>${maxDiff >= 0
+                        ? t('stats.heatTooltip', { m: date.getMonth() + 1, d: date.getDate(), n: cnt, l: difficultyLabel(maxDiff) })
+                        : t('stats.trendTooltip', { m: date.getMonth() + 1, d: date.getDate(), n: cnt })}</title>
                 </rect>`;
             }
         }
@@ -1677,7 +2223,7 @@
         const chartH = gridH * (cell + gap) - gap;
         // 图例：难度色阶 + 色深档位
         const diffLegend = DIFFICULTY_META.map((m, i) =>
-            `<span class="cell" style="background:${m.color}" title="${m.label}"></span>`
+            `<span class="cell" style="background:${m.color}" title="${difficultyLabel(i)}"></span>`
         ).join('');
         const shadeShades = [0.55, 0.32, 0, -0.35, -0.6];
         const shadeLabels = ['1~2', '3~4', '5~6', '7~8', '9+'];
@@ -1686,22 +2232,151 @@
         ).join('');
         html += `
             <div class="pp-chart-card">
-                <div class="pp-chart-title">月度打卡热力图<span class="pp-chart-sub">最近 15 周 · 颜色=最难题难度，色深=完成数</span></div>
+                <div class="pp-chart-title">${t('stats.heatmapTitle')}<span class="pp-chart-sub">${t('stats.heatmapSub')}</span></div>
                 <svg class="pp-chart-svg" viewBox="0 0 ${chartW} ${chartH}" style="height:${chartH + 4}px;width:auto;display:block;margin:0 auto">
                     ${cells}
                 </svg>
                 <div class="pp-legend-block">
-                    <span>难度</span>${diffLegend}
+                    <span>${t('stats.legendDifficulty')}</span>${diffLegend}
                 </div>
                 <div class="pp-legend-block">
-                    <span>完成数</span>
-                    <span class="cell" style="background:#ebedf0"></span><span>0</span>
+                    <span>${t('stats.legendCount')}</span>
+                    <span class="cell" style="background:${emptyHeatColor}"></span><span>0</span>
                     ${shadeLegend}
                 </div>
             </div>
         `;
 
         box.innerHTML = html;
+    }
+
+    // ==================== 备忘录 ====================
+
+    // 紧急优先排序（紧急置顶）
+    function sortedMemos() {
+        return [...memos.filter(m => m.urgent), ...memos.filter(m => !m.urgent)];
+    }
+
+    // 更新顶栏备忘角标（数量 + 有紧急时变红）
+    function updateMemoCount() {
+        const badge = panel.querySelector('#pp-memo-count');
+        if (!badge) return;
+        const urgentCount = memos.filter(m => m.urgent).length;
+        badge.textContent = memos.length;
+        badge.classList.toggle('urgent', urgentCount > 0);
+        badge.title = urgentCount > 0 ? t('memo.urgentTitle') : '';
+    }
+
+    function renderMemos() {
+        const list = panel.querySelector('#pp-memo-list');
+        updateMemoCount();
+        if (memos.length === 0) {
+            list.innerHTML = '<div class="pp-empty"><span class="pp-empty-icon">📝</span><span class="pp-empty-text">' + t('memo.empty') + '</span></div>';
+            return;
+        }
+        list.innerHTML = '';
+        sortedMemos().forEach(m => list.appendChild(createMemoItem(m)));
+    }
+
+    function createMemoItem(memo) {
+        const item = document.createElement('div');
+        item.className = 'pp-memo-item' + (memo.urgent ? ' urgent' : '');
+        item.dataset.id = memo.id;
+
+        const main = document.createElement('div');
+        main.className = 'pp-memo-main';
+        if (memo.urgent) {
+            const badge = document.createElement('span');
+            badge.className = 'pp-memo-urgent-badge';
+            badge.textContent = t('memo.urgentBadge');
+            main.appendChild(badge);
+        }
+        const text = document.createElement('div');
+        text.className = 'pp-memo-text';
+        text.textContent = memo.text;
+        main.appendChild(text);
+        const time = document.createElement('div');
+        time.className = 'pp-memo-time';
+        time.textContent = formatDateTime(memo.createdAt);
+        main.appendChild(time);
+        item.appendChild(main);
+
+        const actions = document.createElement('div');
+        actions.className = 'pp-memo-actions';
+
+        const urgentBtn = document.createElement('button');
+        urgentBtn.className = 'pp-tool-btn pp-tool-pin' + (memo.urgent ? ' pinned' : '');
+        urgentBtn.textContent = memo.urgent ? t('memo.unurgent') : t('memo.urgent');
+        urgentBtn.title = memo.urgent ? t('memo.unurgentTitle') : t('memo.urgentTitle');
+        urgentBtn.addEventListener('click', (e) => { e.preventDefault(); toggleMemoUrgent(memo.id); });
+        actions.appendChild(urgentBtn);
+
+        const upBtn = document.createElement('button');
+        upBtn.className = 'pp-tool-btn pp-tool-move';
+        upBtn.textContent = '▲';
+        upBtn.title = t('item.moveUp');
+        upBtn.addEventListener('click', (e) => { e.preventDefault(); moveMemo(memo.id, -1); });
+        actions.appendChild(upBtn);
+
+        const downBtn = document.createElement('button');
+        downBtn.className = 'pp-tool-btn pp-tool-move';
+        downBtn.textContent = '▼';
+        downBtn.title = t('item.moveDown');
+        downBtn.addEventListener('click', (e) => { e.preventDefault(); moveMemo(memo.id, 1); });
+        actions.appendChild(downBtn);
+
+        const delBtn = document.createElement('button');
+        delBtn.className = 'pp-btn pp-giveup pp-btn-sm';
+        delBtn.textContent = t('memo.delete');
+        delBtn.title = t('memo.deleteTitle');
+        delBtn.addEventListener('click', (e) => { e.preventDefault(); deleteMemo(memo.id); });
+        actions.appendChild(delBtn);
+
+        item.appendChild(actions);
+        return item;
+    }
+
+    function toggleMemoUrgent(id) {
+        const m = memos.find(x => x.id === id);
+        if (!m) return;
+        m.urgent = !m.urgent;
+        saveMemos();
+        renderMemos();
+    }
+
+    function deleteMemo(id) {
+        if (!confirm(t('memo.confirmDelete'))) return;
+        memos = memos.filter(x => x.id !== id);
+        saveMemos();
+        renderMemos();
+    }
+
+    // 移动备忘（同紧急组内交换，与题目置顶逻辑一致）
+    function moveMemo(id, dir) {
+        const sorted = sortedMemos();
+        const idx = sorted.findIndex(m => m.id === id);
+        if (idx === -1) return;
+        const target = idx + dir;
+        if (target < 0 || target >= sorted.length) return;
+        if (sorted[idx].urgent !== sorted[target].urgent) {
+            showToast(t('toast.moveRestricted'), '#FE4C61');
+            return;
+        }
+        [sorted[idx], sorted[target]] = [sorted[target], sorted[idx]];
+        memos = [...sorted.filter(m => m.urgent), ...sorted.filter(m => !m.urgent)];
+        saveMemos();
+        renderMemos();
+    }
+
+    function addMemo() {
+        const input = panel.querySelector('#pp-memo-input');
+        const text = input.value.trim();
+        if (!text) { input.focus(); return; }
+        memos.push(normalizeMemo({ text, urgent: false, createdAt: new Date().toISOString() }));
+        saveMemos();
+        input.value = '';
+        renderMemos();
+        input.focus();
     }
 
     // ==================== 标签页切换 ====================
@@ -1713,6 +2388,7 @@
         if (tab === 'active') renderProblems();
         else if (tab === 'done') renderArchiveList();
         else if (tab === 'stats') renderStats();
+        else if (tab === 'memo') renderMemos();
     }
 
     panel.querySelectorAll('.pp-tab').forEach(tab => {
@@ -1736,10 +2412,10 @@
         const d = new Date();
         const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
         a.href = url;
-        a.download = `做题计划备份_${dateStr}.json`;
+        a.download = t('backup.filename') + '_' + dateStr + '.json';
         a.click();
         URL.revokeObjectURL(url);
-        showToast('数据已导出（含归档）', '#52C41A');
+        showToast(t('toast.exported'), '#52C41A');
     }
 
     function handleFileSelect(event) {
@@ -1749,14 +2425,13 @@
         reader.onload = function (e) {
             try {
                 const data = JSON.parse(e.target.result);
-                if (!data.problems || !Array.isArray(data.problems)) throw new Error('数据格式不正确：缺少题目列表');
+                if (!data.problems || !Array.isArray(data.problems)) throw new Error(t('alert.invalidData'));
                 const importedArchive = Array.isArray(data.archive) ? data.archive : [];
-                const ok = confirm(
-                    `准备合并导入 ${data.problems.length} 个进行中题目\n` +
-                    `已完成归档：${importedArchive.length} 条\n` +
-                    `完成计数：${data.completedCount || 0}\n\n` +
-                    `合并模式：按网址去重，已存在的题目不会被覆盖。\n确定继续吗？`
-                );
+                const ok = confirm(t('confirm.import', {
+                    a: data.problems.length,
+                    b: importedArchive.length,
+                    c: data.completedCount || 0
+                }));
                 if (!ok) { event.target.value = ''; return; }
 
                 // 合并进行中：按 URL 去重，保留现有数据
@@ -1793,25 +2468,25 @@
                 renderProblems();
                 renderArchiveList();
                 showToast(
-                    `合并完成：新增进行中 ${addedActive} · 归档 ${addedArch}` +
-                    (skippedActive + skippedArch ? ` · 跳过重复 ${skippedActive + skippedArch}` : ''),
+                    t('toast.imported', { a: addedActive, b: addedArch }) +
+                    (skippedActive + skippedArch ? t('toast.importedSkip', { n: skippedActive + skippedArch }) : ''),
                     '#52C41A'
                 );
             } catch (error) {
-                alert(`导入失败：${error.message}\n\n请确保选择的是有效的备份文件。`);
+                alert(t('alert.importFail', { e: error.message }));
                 console.error('[做题计划] 导入错误:', error);
             }
             event.target.value = '';
         };
         reader.onerror = function () {
-            alert('读取文件失败，请重试');
+            alert(t('alert.readFail'));
             event.target.value = '';
         };
         reader.readAsText(file);
     }
 
     function clearAllData() {
-        if (problems.length + archive.length > 0 && confirm('确定要清空所有数据（含已完成归档）吗？此操作不可撤销。')) {
+        if (problems.length + archive.length > 0 && confirm(t('confirm.clear'))) {
             clearTimer();
             problems = [];
             archive = [];
@@ -1820,17 +2495,36 @@
             saveArchive();
             renderProblems();
             renderArchiveList();
-            showToast('数据已清空', '#FE4C61');
+            showToast(t('toast.cleared'), '#FE4C61');
         }
     }
 
     // ==================== 设置面板 ====================
+
+    // 主题应用：auto=跟随系统，light=浅色，dark=深色
+    // 通过 container 的 data-theme 属性驱动 CSS 覆盖层
+    const darkQuery = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+    function applyTheme() {
+        const t = settings.theme || 'auto';
+        const dark = t === 'dark' || (t === 'auto' && darkQuery && darkQuery.matches);
+        container.setAttribute('data-theme', dark ? 'dark' : 'light');
+        // 统计图表 SVG 中的占位色随主题变化，重新渲染
+        if (isPanelVisible && currentTab === 'stats') renderStats();
+    }
+    // 系统主题切换时，auto 模式自动跟随
+    if (darkQuery && darkQuery.addEventListener) {
+        darkQuery.addEventListener('change', () => {
+            if ((settings.theme || 'auto') === 'auto') applyTheme();
+        });
+    }
 
     function syncSettingsUI() {
         panel.querySelector('#pp-focus-min').value = settings.focusMinutes;
         panel.querySelector('#pp-break-min').value = settings.breakMinutes;
         panel.querySelector('#pp-auto-break').checked = !!settings.autoBreak;
         panel.querySelector('#pp-daily-goal').value = settings.dailyGoal || 0;
+        panel.querySelector('#pp-theme').value = settings.theme || 'auto';
+        panel.querySelector('#pp-lang').value = settings.lang || 'zh-CN';
     }
 
     function bindSettings() {
@@ -1838,19 +2532,27 @@
         const breakInput = panel.querySelector('#pp-break-min');
         const autoBreak = panel.querySelector('#pp-auto-break');
         const dailyGoalInput = panel.querySelector('#pp-daily-goal');
+        const themeSelect = panel.querySelector('#pp-theme');
+        const langSelect = panel.querySelector('#pp-lang');
 
         function apply() {
             settings.focusMinutes = Math.min(120, Math.max(1, parseInt(focusInput.value, 10) || 25));
             settings.breakMinutes = Math.min(60, Math.max(1, parseInt(breakInput.value, 10) || 5));
             settings.autoBreak = autoBreak.checked;
             settings.dailyGoal = Math.min(100, Math.max(0, parseInt(dailyGoalInput.value, 10) || 0));
+            settings.theme = themeSelect.value || 'auto';
+            settings.lang = langSelect.value || 'zh-CN';
             saveSettings();
-            showToast('设置已保存', '#3498DB');
+            applyTheme();
+            applyLang();
+            showToast(t('toast.settingsSaved'), '#3498DB');
         }
         focusInput.addEventListener('change', apply);
         breakInput.addEventListener('change', apply);
         autoBreak.addEventListener('change', apply);
         dailyGoalInput.addEventListener('change', apply);
+        themeSelect.addEventListener('change', apply);
+        langSelect.addEventListener('change', apply);
 
         panel.querySelector('#pp-settings-toggle').addEventListener('click', () => {
             const box = panel.querySelector('#pp-settings');
@@ -1949,6 +2651,262 @@
         return null;
     }
 
+    // ==================== 洛谷标签映射 ====================
+    // 洛谷官方接口 /_lfe/tags 返回完整标签表：{"tags":[{id,name,type,parent}],"types":[...]}
+    // 题目页响应中 tags 为 ID 数组（如 "tags":[1,3]），需映射为名称
+    const TAG_MAP_KEY = 'problemPlanner_tagMap';
+    const TAG_MAP_TTL = 7 * 24 * 3600 * 1000; // 映射表缓存 7 天
+
+    // 标签分类展示顺序：来源 → 时间 → 区域 → 算法 → 特殊题目 → 其他
+    // 对应洛谷 type：3=Origin(来源) 4=Time(时间) 1=Region(区域) 2=Algorithm(算法) 5=SpecialProblem(特殊) 6=Others(其他)
+    const TAG_TYPE_ORDER = { 3: 0, 4: 1, 1: 2, 2: 3, 5: 4, 6: 5 };
+    function tagTypeSortKey(type) {
+        return (type in TAG_TYPE_ORDER) ? TAG_TYPE_ORDER[type] : 99;
+    }
+
+    // 洛谷标签 中文名 → 英文名（用于英文界面；未收录标签保持中文原名）
+    const LUOGU_TAG_EN = {
+        // —— 算法 ——
+        '语言入门': 'Language Basics', '模拟': 'Simulation', '字符串': 'Strings',
+        '动态规划 DP': 'Dynamic Programming', '搜索': 'Search', '数学': 'Math',
+        '图论': 'Graph Theory', '贪心': 'Greedy', '计算几何': 'Computational Geometry',
+        '暴力数据结构': 'Brute-force Data Structures', '高精度': 'Big Integers',
+        '树形数据结构': 'Tree Data Structures', '递推': 'Recurrence', '博弈论': 'Game Theory',
+        '莫队': "Mo's Algorithm", '线段树': 'Segment Tree', '倍增': 'Binary Lifting',
+        '线性数据结构': 'Linear Data Structures', '二分': 'Binary Search',
+        '并查集': 'DSU (Union-Find)', '点分治': 'Centroid Decomposition',
+        '平衡树': 'Balanced Tree', '堆': 'Heap', '树状数组': 'Fenwick Tree',
+        '递归': 'Recursion', '树上启发式合并': 'DSU on Tree', '单调队列': 'Monotonic Queue',
+        '矩阵树定理': 'Matrix Tree Theorem', '颜色段均摊（珂朵莉树 ODT）': 'ODT (Chtholly Tree)',
+        '原根': 'Primitive Root', '三分': 'Ternary Search',
+        'Kruskal 重构树': 'Kruskal Reconstruction Tree', '多项式': 'Polynomials',
+        '矩阵运算': 'Matrix Operations', '数论': 'Number Theory', '离散化': 'Discretization',
+        '网络流': 'Network Flow', '后缀自动机 SAM': 'Suffix Automaton (SAM)',
+        '枚举': 'Enumeration', '分治': 'Divide and Conquer', '排序': 'Sorting',
+        '信息论': 'Information Theory', '剪枝': 'Pruning', '记忆化搜索': 'Memoized Search',
+        '启发式搜索': 'Heuristic Search', '迭代加深搜索': 'Iterative Deepening Search',
+        '模拟退火': 'Simulated Annealing', '随机调整': 'Random Adjustment', '遗传算法': 'Genetic Algorithm',
+        '背包 DP': 'Knapsack DP', '数位 DP': 'Digit DP', '区间 DP': 'Interval DP',
+        '动态规划优化': 'DP Optimization', '优先队列': 'Priority Queue',
+        '矩阵加速': 'Matrix Exponentiation', '斜率优化': 'Convex Hull Trick',
+        '状态合并': 'State Merging', '树形 DP': 'Tree DP',
+        '凸完全单调性（wqs 二分）': 'WQS Binary Search', '四边形不等式': 'Quadrangle Inequality',
+        '图论建模': 'Graph Modeling', '图遍历': 'Graph Traversal', '拓扑排序': 'Topological Sort',
+        '最短路': 'Shortest Path', '生成树': 'Spanning Tree', '平面图': 'Planar Graph',
+        '最小环': 'Minimum Cycle', '负权环': 'Negative Cycle', '连通块': 'Connected Components',
+        '平面图欧拉公式': "Euler's Formula", '强连通分量': 'SCC',
+        '双连通分量': 'Biconnected Components', '欧拉回路': 'Eulerian Circuit',
+        '差分约束': 'Difference Constraints', '仙人掌': 'Cactus', '二分图': 'Bipartite Graph',
+        '一般图的最大匹配': 'General Graph Matching', '上下界网络流': 'Bounded Network Flow',
+        '最小割': 'Minimum Cut', '分数规划': 'Fractional Programming', '费用流': 'Min-Cost Flow',
+        '树的遍历': 'Tree Traversal', '树的直径': 'Tree Diameter', '霍夫曼树': 'Huffman Tree',
+        '可并堆': 'Mergeable Heap', '树链剖分': 'Heavy-Light Decomposition',
+        '动态树 LCT': 'Link-Cut Tree', '树论': 'Tree Theory', '树套树': 'Tree in Tree',
+        '可持久化线段树': 'Persistent Segment Tree', '可持久化': 'Persistent',
+        '素数判断': 'Primality Test', '扩展欧几里德算法': 'Extended Euclidean Algorithm',
+        '不定方程': 'Diophantine Equation', '进制': 'Base Conversion', '群论': 'Group Theory',
+        '置换': 'Permutation', '虚树': 'Virtual Tree', '莫比乌斯反演': 'Möbius Inversion',
+        '组合数学': 'Combinatorics', '排列组合': 'Permutations & Combinations',
+        '前缀和': 'Prefix Sum', '二项式定理': 'Binomial Theorem', '康托展开': 'Cantor Expansion',
+        '鸽笼原理': 'Pigeonhole Principle', '容斥原理': 'Inclusion-Exclusion',
+        'Catalan 数': 'Catalan Number', 'Stirling 数': 'Stirling Number',
+        'A*  算法': 'A* Algorithm', '生成函数': 'Generating Functions',
+        '线性规划': 'Linear Programming', '概率论': 'Probability Theory', '期望': 'Expectation',
+        '线性代数': 'Linear Algebra', '矩阵乘法': 'Matrix Multiplication',
+        '线性递推': 'Linear Recurrence', '高斯消元': 'Gaussian Elimination',
+        '逆元': 'Modular Inverse', '线性基': 'Linear Basis', '微积分': 'Calculus',
+        '导数': 'Derivative', '积分': 'Integral', '定积分': 'Definite Integral',
+        '三维计算几何': '3D Computational Geometry', '级数': 'Series', '向量': 'Vector',
+        '栈': 'Stack', '队列': 'Queue', '分块': 'Sqrt Decomposition', 'ST 表': 'Sparse Table',
+        '凸包': 'Convex Hull', '叉积': 'Cross Product', '线段相交': 'Segment Intersection',
+        '半平面交': 'Half-plane Intersection', '扫描线': 'Sweep Line', '旋转卡壳': 'Rotating Calipers',
+        'AC 自动机': 'Aho-Corasick Automaton', '后缀数组 SA': 'Suffix Array (SA)',
+        '后缀树': 'Suffix Tree', '有限状态自动机': 'Finite State Automaton',
+        '其它技巧': 'Other Techniques', '随机化': 'Randomization', '博弈树': 'Game Tree',
+        '位运算': 'Bit Manipulation', '整体二分': 'Parallel Binary Search', '构造': 'Constructive',
+        '基环树': 'Functional Graph', '轮廓线 DP': 'Plug DP', '差分': 'Difference Array',
+        '双指针 two-pointer': 'Two Pointers', '圆方树': 'Block-Cut Tree',
+        '顺序结构': 'Sequential Structure', '分支结构': 'Branching Structure', '循环结构': 'Loops',
+        '数组': 'Array', '字符串（入门）': 'Strings (Beginner)', '结构体': 'Struct',
+        '函数与递归': 'Functions & Recursion', '链表': 'Linked List', '笛卡尔树': 'Cartesian Tree',
+        '拟阵': 'Matroid', 'Nim 积': 'Nim Product', '根号分治': 'Sqrt Decomposition',
+        '拉格朗日反演': 'Lagrange Inversion', '模拟费用流': 'Simulated Cost Flow',
+        '分散层叠': 'Fractional Cascading', '均摊分析': 'Amortized Analysis',
+        '分类讨论': 'Case Analysis', '李超线段树': 'Li Chao Segment Tree',
+        '线段树合并': 'Segment Tree Merging', '动态树分治': 'Dynamic Tree Divide & Conquer',
+        '单调栈': 'Monotonic Stack', '杨表': 'Young Tableau', '类欧几里得算法': 'Euclidean-like Algorithm',
+        '梯度下降法': 'Gradient Descent', '调和级数': 'Harmonic Series',
+        '拉格朗日乘数法': 'Lagrange Multipliers', '近似算法': 'Approximation Algorithms',
+        '欧拉降幂': 'Euler Power Reduction', '集合幂级数，子集卷积': 'Subset Convolution',
+        '拉格朗日插值法': 'Lagrange Interpolation', '动态 DP': 'Dynamic DP', '线性 DP': 'Linear DP',
+        'SG 函数': 'Sprague-Grundy Function', '线段树分治': 'Segment Tree Divide & Conquer',
+        '离线处理': 'Offline Processing', '整除分块': 'Integer Division Decomposition',
+        '极角排序': 'Polar Angle Sorting', '弦图': 'Chordal Graph', '二次剩余': 'Quadratic Residue',
+        '行列式': 'Determinant', '杜教筛': "Du's Sieve", '欧拉函数': 'Euler Totient Function',
+        '决策单调性': 'Decision Monotonicity', '状压 DP': 'Bitmask DP', '特征值': 'Eigenvalue',
+        '组合优化': 'Combinatorial Optimization', '整数规划': 'Integer Programming',
+        '原始对偶': 'Primal-Dual', '最大流最小割定理': 'Max-Flow Min-Cut Theorem',
+        '全局平衡二叉树': 'Global Balanced Binary Tree', '哈希表': 'Hash Table',
+        'Z 函数': 'Z-function', '线性筛法': 'Linear Sieve', 'Floyd 算法': 'Floyd Algorithm',
+        '启发式合并': 'Small-to-Large Merging', '单位根反演': 'Root of Unity Filter',
+        '平面几何': 'Plane Geometry', '树的重心': 'Tree Centroid', '保序回归': 'Isotonic Regression',
+        '后缀平衡树': 'Suffix Balanced Tree', '整体转移': 'Global Transition',
+        '反悔贪心': 'Greedy with Repentance', '广义串并联图': 'Series-Parallel Graph',
+        '二区间合并（猫树分治）': 'Cat Tree Divide & Conquer',
+        '亚线性快速求和算法': 'Sublinear Summation',
+        // —— 特殊题目 ——
+        '交互题': 'Interactive', '提交答案': 'Output Only', 'O2优化': 'O2 Optimization', '通信题': 'Communication',
+        // —— 区域 ——
+        '重庆': 'Chongqing', '四川': 'Sichuan', '河南': 'Henan', '浙江': 'Zhejiang', '上海': 'Shanghai',
+        '福建': 'Fujian', '江苏': 'Jiangsu', '安徽': 'Anhui', '湖南': 'Hunan', '北京': 'Beijing',
+        '河北': 'Hebei', '广东': 'Guangdong', '山东': 'Shandong', '吉林': 'Jilin', '山西': 'Shanxi',
+        '江西': 'Jiangxi', '贵州': 'Guizhou', '广西': 'Guangxi', '陕西': 'Shaanxi', '辽宁': 'Liaoning',
+        '云南': 'Yunnan', '天津': 'Tianjin', '湖北': 'Hubei', '黑龙江': 'Heilongjiang', '海南': 'Hainan',
+        '甘肃': 'Gansu', '青海': 'Qinghai', '台湾': 'Taiwan', '内蒙古': 'Inner Mongolia', '西藏': 'Tibet',
+        '宁夏': 'Ningxia', '新疆': 'Xinjiang', '香港': 'Hong Kong', '澳门': 'Macau',
+        '济南': 'Jinan', '南京': 'Nanjing', '青岛': 'Qingdao', '杭州': 'Hangzhou', '昆明': 'Kunming',
+        '西安': "Xi'an", '哈尔滨': 'Harbin', '成都': 'Chengdu', '首尔': 'Seoul', '横浜': 'Yokohama',
+        '雅加达': 'Jakarta', '国内省市': 'Domestic Provinces', '国内赛站': 'Domestic Sites',
+        '国际赛区': 'International Sites',
+        // —— 来源 ——
+        '各省省选': 'Provincial Selection', '集训队互测': 'Team Mutual Tests',
+        '福建省历届夏令营': 'Fujian Summer Camp', '洛谷原创': 'Luogu Original',
+        'NOIP 普及组': 'NOIP Popularization Group', 'NOIP 提高组': 'NOIP Improvement Group',
+        'NOI 导刊': 'NOI Guide', '洛谷月赛': 'Luogu Monthly Contest', '洛谷比赛': 'Luogu Contest',
+        '语言月赛': 'Language Monthly', '蓝桥杯国赛': 'Blue Bridge Cup National',
+        '蓝桥杯省赛': 'Blue Bridge Cup Provincial', '蓝桥杯青少年组': 'Blue Bridge Cup Youth',
+        '省赛/邀请赛': 'Provincial/Invitational', '传智杯': 'Chuanzhi Cup',
+        '经典套题': 'Classic Problem Sets', '国际知名赛事': 'International Contests',
+        '大学竞赛': 'University Contests', '其他竞赛': 'Other Contests', '高校校赛': 'University Contests',
+        '信息与未来': 'Information & Future', '科创活动': 'Innovation Activities',
+        '小学活动': 'Primary Activities', '初中活动': 'Junior High Activities',
+        '科大国创杯': 'USTC Innovation Cup', '梦熊比赛': 'Mengxiong Contest',
+        '模板题': 'Template Problems', '入门赛': 'Beginner Contest',
+        '网络流与线性规划 24 题': 'Network Flow 24 Problems',
+        'CSP-S 提高级': 'CSP-S Senior', 'CSP-J 入门级': 'CSP-J Junior', 'CSP-X 小学组': 'CSP-X Primary',
+        'CTT（清华集训/北大集训）': 'CTT (THU/PKU Camp)', 'POI（波兰）': 'POI (Poland)',
+        'CCO（加拿大）': 'CCO (Canada)', 'CCC（加拿大）': 'CCC (Canada)', 'CEOI（中欧）': 'CEOI (Central Europe)',
+        'eJOI（欧洲）': 'eJOI (Europe)', 'COCI（克罗地亚）': 'COCI (Croatia)', 'BalticOI（波罗的海）': 'BalticOI (Baltic)',
+        'JOI（日本）': 'JOI (Japan)', 'PA（波兰）': 'PA (Poland)', 'ROI（俄罗斯）': 'ROI (Russia)',
+        'EGOI（欧洲/女生）': 'EGOI (Europe/Girls)', 'NOI 系列赛事': 'NOI Series',
+        'NOISG（新加坡）': 'NOISG (Singapore)', 'NordicOI（北欧）': 'NordicOI (Nordic)',
+        'BalkanOI（巴尔干半岛）': 'BalkanOI (Balkans)', 'KOI（韩国）': 'KOI (Korea)',
+        'RMI（罗马尼亚）': 'RMI (Romania)', 'COI（克罗地亚）': 'COI (Croatia)', 'ROIR（俄罗斯）': 'ROIR (Russia)',
+        'INOI（伊朗）': 'INOI (Iran)', 'UOI（乌克兰）': 'UOI (Ukraine)', 'JOISC/JOIST（日本）': 'JOISC/JOIST (Japan)',
+        'COTS（克罗地亚）': 'COTS (Croatia)', 'PO（瑞典）': 'PO (Sweden)', 'MCC/MCO（马来西亚）': 'MCC/MCO (Malaysia)',
+        'KTSC（韩国）': 'KTSC (Korea)', 'IATI（保加利亚/东欧）': 'IATI (Bulgaria/Eastern Europe)',
+        // —— 其他/分类 ——
+        '算法': 'Algorithms', '数据结构': 'Data Structures', '来源': 'Source', '时间': 'Time',
+        '高级数据结构': 'Advanced Data Structures', '地区': 'Region', '特殊题目': 'Special Problems',
+        '快速排序': 'Quicksort', '堆排序': 'Heapsort', '希尔排序': 'Shell Sort',
+        '查找算法': 'Search Algorithms', '顺序查找': 'Linear Search', '环形 dp': 'Circular DP',
+        '多维状态': 'Multi-dimensional State', '邻接矩阵': 'Adjacency Matrix', '邻接表': 'Adjacency List',
+        '生成树的另类算法': 'Alternative Spanning Tree Algorithms', '次小生成树': 'Second MST',
+        '特殊生成树': 'Special Spanning Trees', '匈牙利算法': 'Hungarian Algorithm',
+        '带权二分图匹配': 'Weighted Bipartite Matching', '稳定婚姻系统': 'Stable Marriage',
+        '闭合图': 'Closure Graph', '最小点权覆盖集': 'Min-weight Vertex Cover',
+        '最大点权独立集': 'Max-weight Independent Set', '最大密度子图': 'Maximum Density Subgraph',
+        '最短路增广费用流': 'Shortest Path Cost Flow', '最小费用可行流': 'Min-cost Feasible Flow',
+        '树上距离': 'Tree Distance', '节点到根的距离': 'Distance to Root', '节点间的距离': 'Distance between Nodes',
+        '斜堆': 'Skew Heap', '二项堆': 'Binomial Heap', '静态排序树': 'Static Sorting Tree',
+        '替罪羊树': 'Scapegoat Tree', '二维线段树': '2D Segment Tree', '矩形树': 'Rectangle Tree',
+        '动态树': 'Dynamic Tree', '袋与球问题': 'Balls & Bins', '简单概率': 'Basic Probability',
+        '异或方程组': 'XOR Equations', '基本数组': 'Basic Arrays', '最近点对': 'Closest Pair',
+        '简单密码学': 'Basic Cryptography', '随机算法': 'Randomized Algorithms',
+        '概率生成函数': 'Probability Generating Functions', '半正定规划': 'Semidefinite Programming'
+    };
+
+    let tagMapCache = null;   // 内存缓存 {id: {name, type}}
+    let tagMapPromise = null; // 进行中的请求（防并发重复请求）
+
+    // 获取标签 ID → {name, type} 映射（内存缓存 + GM 存储 7 天）
+    async function fetchTagMap() {
+        if (tagMapCache) return tagMapCache;
+        // 先尝试从 GM 存储读取缓存（ver=2 为新格式：值为 {name,type}）
+        try {
+            const saved = GM_getValue(TAG_MAP_KEY);
+            if (saved) {
+                const data = JSON.parse(saved);
+                if (data && data.ver === 2 && data.ts && (Date.now() - data.ts) < TAG_MAP_TTL && data.map) {
+                    tagMapCache = data.map;
+                    return tagMapCache;
+                }
+            }
+        } catch (e) { /* ignore */ }
+        if (tagMapPromise) return tagMapPromise;
+        tagMapPromise = (async () => {
+            const map = {};
+            try {
+                const html = await luoguGet('https://www.luogu.com.cn/_lfe/tags');
+                const data = JSON.parse(html);
+                (data.tags || []).forEach(t => {
+                    if (t && typeof t.id === 'number' && t.name) {
+                        map[t.id] = {
+                            name: t.name,
+                            en: LUOGU_TAG_EN[t.name] || t.name,
+                            type: typeof t.type === 'number' ? t.type : 6
+                        };
+                    }
+                });
+                try { GM_setValue(TAG_MAP_KEY, JSON.stringify({ ts: Date.now(), ver: 2, map })); } catch (e) { /* ignore */ }
+            } catch (e) {
+                console.warn('[做题计划] 获取洛谷标签映射失败，本次不附加标签:', e);
+                // 失败时不缓存，下次再试；返回空映射，不影响加入流程
+            }
+            tagMapCache = map;
+            return map;
+        })();
+        try { return await tagMapPromise; } finally { tagMapPromise = null; }
+    }
+
+    // 从洛谷响应解析标签（ID 数组 → 名称，去重，按分类排序，最多 6 个）
+    async function parseLuoguTags(html) {
+        const src = String(html);
+        // 提取 "tags":[1,3] 中的 ID 数组
+        const ids = [];
+        const jm = src.match(/"tags"\s*:\s*\[([\s\S]*?)\]/);
+        if (jm) {
+            jm[1].replace(/-?\d+/g, n => { ids.push(parseInt(n, 10)); return n; });
+        }
+        const tags = []; // {name, type}
+        const seen = new Set();
+        if (ids.length) {
+            const map = await fetchTagMap();
+            ids.forEach(id => {
+                const info = map[id];
+                const name = info && info.name ? info.name : null;
+                if (name && !seen.has(name)) {
+                    seen.add(name);
+                    tags.push({ name, en: info.en, type: info.type });
+                }
+            });
+        }
+        // 兜底：链接文本解析（兼容老版页面结构）——无类型信息，归入「其他」最后展示
+        if (!tags.length) {
+            const re = /<a[^>]*href="[^"]*\/problem\/list\?(?:tag|keyword)=[^"]*"[^>]*>([^<]{1,20})<\/a>/gi;
+            let m;
+            while ((m = re.exec(src)) !== null) {
+                const t = decodeHTML(m[1]).trim();
+                if (t && t !== '标签' && t !== '查看题解' && !seen.has(t)) { seen.add(t); tags.push({ name: t, en: t, type: 6 }); }
+            }
+        }
+        // 按分类顺序排序：来源 → 时间 → 区域 → 算法 → 特殊题目 → 其他
+        tags.sort((a, b) => tagTypeSortKey(a.type) - tagTypeSortKey(b.type));
+        return tags.map(x => (currentLang === 'en' ? x.en : x.name)).slice(0, 6);
+    }
+
+    // 标签数组 → 备注格式：[tag1];[tag2];[tag3]
+    function formatTags(tags) {
+        return (tags || []).map(t => '[' + t + ']').join(';');
+    }
+
+    // 合并标签到备注：无备注直接写标签，有备注追加在新行
+    function mergeTagsToNotes(existingNotes, tags) {
+        const tagStr = formatTags(tags);
+        if (!tagStr) return existingNotes || '';
+        return existingNotes ? existingNotes + '\n' + tagStr : tagStr;
+    }
+
     // 从洛谷响应解析题名（<title>）
     function parseLuoguTitle(html, pid) {
         const m = String(html).match(/<title>([\s\S]*?)<\/title>/i);
@@ -1964,52 +2922,100 @@
                 url,
                 timeout: 12000,
                 onload: (res) => {
-                    if (res.status !== 200) { reject(new Error('洛谷返回状态码 ' + res.status)); return; }
+                    if (res.status !== 200) { reject(new Error(t('err.luoguStatus', { s: res.status }))); return; }
                     resolve(res.responseText);
                 },
-                onerror: () => reject(new Error('网络请求失败')),
-                ontimeout: () => reject(new Error('请求超时'))
+                onerror: () => reject(new Error(t('err.network'))),
+                ontimeout: () => reject(new Error(t('err.timeout')))
             });
         });
     }
 
-    // 获取洛谷题目信息（题名 + 难度）
+    // CF API GET 封装（codeforces.com/api/*）
+    function cfGet(url) {
+        return new Promise((resolve, reject) => {
+            GM_xmlhttpRequest({
+                method: 'GET',
+                url,
+                timeout: 12000,
+                onload: (res) => {
+                    if (res.status !== 200) { reject(new Error(t('err.cfFail') + ' (' + res.status + ')')); return; }
+                    resolve(res.responseText);
+                },
+                onerror: () => reject(new Error(t('err.network'))),
+                ontimeout: () => reject(new Error(t('err.timeout')))
+            });
+        });
+    }
+
+    // 获取 CF 题目信息（原生标签 + 难度评分 rating）
+    async function fetchCFInfo(contest, index) {
+        const url = 'https://codeforces.com/api/contest.standings?contestId=' + encodeURIComponent(contest) + '&from=1&count=1';
+        const json = await cfGet(url);
+        const data = JSON.parse(json);
+        if (data.status !== 'OK' || !data.result || !Array.isArray(data.result.problems)) {
+            throw new Error(t('err.cfFail'));
+        }
+        const p = data.result.problems.find(x => String(x.index) === String(index));
+        if (!p) return { tags: [], rating: null };
+        return {
+            tags: Array.isArray(p.tags) ? p.tags.slice() : [],
+            rating: (typeof p.rating === 'number' && p.rating > 0) ? p.rating : null
+        };
+    }
+
+    // 获取洛谷题目信息（题名 + 难度 + 标签）
     async function fetchLuoguInfo(luoguPid) {
         const html = await luoguGet('https://www.luogu.com.cn/problem/' + encodeURIComponent(luoguPid) + '?_contentOnly=1');
         const difficulty = parseLuoguDifficulty(html);
         const title = parseLuoguTitle(html, luoguPid);
         if (difficulty === null && !title) {
-            throw new Error('洛谷未收录该题或解析失败（' + luoguPid + '）');
+            throw new Error(t('err.luoguMissing', { pid: luoguPid }));
         }
-        return { title, difficulty };
+        return { title, difficulty, tags: await parseLuoguTags(html) };
     }
 
     // 一键加入（从当前 OJ 页面）
+    // ojAddTags 为全局标签开关：true 时自动获取标签写入备注
     async function addFromOJPage(btn) {
         const det = detectOJ();
         if (!det) return;
         try {
-            if (btn) { btn.disabled = true; btn.textContent = '⏳ 获取中…'; }
+            if (btn) { btn.disabled = true; btn.textContent = t('oj.fetching'); }
             const luoguPid = det.luoguPid;
             const pageUrl = det.pageUrl || location.href;
             if (problems.some(p => p.url === pageUrl)) {
-                showToast('此题目已在计划中！', '#F39C11');
+                showToast(t('toast.alreadyInPlan'), '#F39C11');
                 return;
             }
             if (archive.some(a => a.url === pageUrl)) {
-                showToast('此题目已在已完成记录中！', '#F39C11');
+                showToast(t('toast.alreadyDone'), '#F39C11');
                 return;
             }
             let name = ojPageTitle(det) || '';
             let difficulty = null;
+            let tags = [];
             if (luoguPid) {
                 try {
                     const info = await fetchLuoguInfo(luoguPid);
                     if (!name) name = info.title;
                     difficulty = info.difficulty;
+                    tags = info.tags || [];
                 } catch (err) {
-                    alert('获取题目信息失败：' + err.message + '\n\n题目未加入。');
+                    alert(t('alert.fetchFail', { e: err.message }));
                     return;
+                }
+            }
+            // CF 题目：改用 CF 原生标签 + 难度评分（*rating），覆盖洛谷 RMJ 标签
+            if (det.site === 'codeforces' && ojAddTags && det.contest && det.index) {
+                try {
+                    const cf = await fetchCFInfo(det.contest, det.index);
+                    const cfTags = [];
+                    if (cf.rating) cfTags.push('*' + cf.rating);
+                    cfTags.push.apply(cfTags, cf.tags);
+                    if (cfTags.length) tags = cfTags;
+                } catch (e) {
+                    console.warn('[做题计划] 获取 CF 标签失败，沿用已有标签:', e);
                 }
             }
             // 显示名采用「题号 + 题目名」格式（如 P1001 A+B Problem / CF2081G1 题目名）
@@ -2018,24 +3024,31 @@
             const color = difficulty !== null && difficulty !== undefined
                 ? difficultyColor(difficulty)
                 : selectedColor;
+            // 标签开关开启时，按 [tag1];[tag2];[tag3] 格式写入备注
+            const notes = ojAddTags ? mergeTagsToNotes('', tags) : '';
             problems.push(normalizeProblem({
                 url: pageUrl,
-                name: displayName || luoguPid || '未命名题目',
+                name: displayName || luoguPid || t('misc.unnamedProblem'),
                 color,
+                notes,
                 addedDate: new Date().toISOString(),
                 difficulty
             }));
             saveData();
-            if (btn) { btn.textContent = '✓ 已加入'; btn.classList.add('ok'); }
-            showToast('已加入计划' + (difficulty !== null ? ' · 难度 ' + difficultyLabel(difficulty) : ''), '#52C41A');
+            if (btn) { btn.textContent = t('oj.joined'); btn.classList.add('ok'); }
+            let msg = (difficulty !== null && difficulty !== undefined)
+                ? t('toast.addedDiff', { d: difficultyLabel(difficulty) })
+                : t('toast.added');
+            if (notes) msg += t('toast.addedTags', { n: tags.length });
+            showToast(msg, '#52C41A');
         } catch (err) {
-            alert('加入失败：' + err.message);
+            alert(t('alert.joinFail', { e: err.message }));
         } finally {
             if (btn) {
                 setTimeout(() => {
                     btn.disabled = false;
                     btn.classList.remove('ok');
-                    btn.textContent = '＋ 加入做题计划';
+                    btn.textContent = t('oj.addBtn');
                 }, 1500);
             }
         }
@@ -2044,6 +3057,7 @@
     // OJ 悬浮按钮注入（轮询检测，兼容洛谷 PJAX 页面切换）
     let ojBtn = null;
     let ojInjectedKey = '';
+    let ojAddTags = false; // 「一键加入」标签开关状态
     function ensureOJButton() {
         const det = detectOJ();
         const key = det ? (det.site + '|' + (det.luoguPid || '') + '|' + (det.pageUrl || '')) : '';
@@ -2051,11 +3065,32 @@
         ojInjectedKey = key;
         if (ojBtn) { ojBtn.remove(); ojBtn = null; }
         if (!det) return;
-        ojBtn = document.createElement('button');
-        ojBtn.className = 'pp-oj-btn';
-        ojBtn.textContent = '＋ 加入做题计划';
-        ojBtn.title = '获取洛谷 RMJ 难度并加入做题计划';
-        ojBtn.addEventListener('click', () => addFromOJPage(ojBtn));
+        // 容器：主按钮 + 标签开关
+        ojBtn = document.createElement('div');
+        ojBtn.className = 'pp-oj-group';
+        const main = document.createElement('button');
+        main.className = 'pp-oj-btn';
+        main.textContent = t('oj.addBtn');
+        main.title = t('oj.addBtnTitle');
+        main.addEventListener('click', () => addFromOJPage(main));
+        const tagToggle = document.createElement('button');
+        tagToggle.className = 'pp-oj-tag-toggle';
+        tagToggle.textContent = t('oj.tagToggle');
+        tagToggle.title = t('oj.tagToggleTitle', { s: t('oj.off') });
+        const syncTagUI = () => {
+            tagToggle.classList.toggle('on', ojAddTags);
+            tagToggle.textContent = ojAddTags ? t('oj.tagToggleOn') : t('oj.tagToggle');
+            tagToggle.title = t('oj.tagToggleTitle', { s: ojAddTags ? t('oj.on') : t('oj.off') });
+        };
+        syncTagUI();
+        tagToggle.addEventListener('click', (e) => {
+            e.preventDefault();
+            ojAddTags = !ojAddTags;
+            syncTagUI();
+            showToast(ojAddTags ? t('toast.tagsOn') : t('toast.tagsOff'), ojAddTags ? '#52C41A' : '#9aa3bf');
+        });
+        ojBtn.appendChild(main);
+        ojBtn.appendChild(tagToggle);
         document.body.appendChild(ojBtn);
     }
     function startOjWatch() {
@@ -2068,7 +3103,19 @@
     let trainingBtn = null;
     let trainingBtnKey = '';
 
-    // 检测当前是否为洛谷题单页（/training/<id>），注入「导入整个题单」按钮
+    // 批量导入共享选项（题单页按钮 / 洛谷导入面板共用）
+    let importWithTags = false;  // 是否自动获取标签写入备注
+    let importDiffMin = 0;       // 难度范围下限（0-8）
+    let importDiffMax = DIFF_MAX; // 难度范围上限（0-8）
+
+    // 难度范围 UI 同步（select 元素 value 使用 DIFFICULTY_META 索引）
+    function diffSelectOptions(selected) {
+        return DIFFICULTY_META.map((m, i) =>
+            '<option value="' + i + '"' + (i === selected ? ' selected' : '') + '>' + difficultyLabel(i) + '</option>'
+        ).join('');
+    }
+
+    // 检测当前是否为洛谷题单页（/training/<id>），注入「导入整个题单」按钮 + 标签开关 + 难度范围
     function ensureTrainingButton() {
         const m = location.pathname.match(/^\/training\/(\d+)/);
         const key = m ? ('training|' + m[1]) : '';
@@ -2076,12 +3123,89 @@
         trainingBtnKey = key;
         if (trainingBtn) { trainingBtn.remove(); trainingBtn = null; }
         if (!m) return;
-        trainingBtn = document.createElement('button');
-        trainingBtn.className = 'pp-oj-btn';
-        trainingBtn.textContent = '📥 导入整个题单';
-        trainingBtn.title = '将当前洛谷题单的所有题目批量加入做题计划';
-        trainingBtn.addEventListener('click', () => importCurrentTraining(trainingBtn));
+        // 容器：主按钮 + 标签开关 + 难度范围
+        trainingBtn = document.createElement('div');
+        trainingBtn.className = 'pp-oj-group';
+
+        const main = document.createElement('button');
+        main.className = 'pp-oj-btn';
+        main.textContent = t('training.importAll');
+        main.title = t('training.importAllTitle');
+        main.addEventListener('click', () => importCurrentTraining(main));
+
+        const tagToggle = document.createElement('button');
+        tagToggle.className = 'pp-oj-tag-toggle';
+        tagToggle.title = t('oj.tagToggleTitle', { s: t('oj.off') });
+        const syncTagUI = () => {
+            tagToggle.classList.toggle('on', importWithTags);
+            tagToggle.textContent = importWithTags ? t('oj.tagToggleOn') : t('oj.tagToggle');
+            tagToggle.title = t('oj.tagToggleTitle', { s: importWithTags ? t('oj.on') : t('oj.off') });
+        };
+        syncTagUI();
+        tagToggle.addEventListener('click', (e) => {
+            e.preventDefault();
+            importWithTags = !importWithTags;
+            syncTagUI();
+            syncPanelImportUI();
+            showToast(importWithTags ? t('toast.tagsOn') : t('toast.tagsOff'), importWithTags ? '#52C41A' : '#9aa3bf');
+        });
+
+        // 难度范围按钮：点击展开/收起内联选择器
+        const diffBtn = document.createElement('button');
+        diffBtn.className = 'pp-oj-tag-toggle';
+        diffBtn.textContent = t('oj.diff');
+        diffBtn.title = t('oj.diffTitle');
+        const diffPanel = document.createElement('div');
+        diffPanel.className = 'pp-oj-diff-panel';
+        diffPanel.style.display = 'none';
+        diffPanel.innerHTML =
+            '<div class="pp-oj-diff-row"><span>' + t('oj.diffMin') + '</span>' +
+            '<select class="pp-oj-diff-min">' + diffSelectOptions(importDiffMin) + '</select></div>' +
+            '<div class="pp-oj-diff-row"><span>' + t('oj.diffMax') + '</span>' +
+            '<select class="pp-oj-diff-max">' + diffSelectOptions(importDiffMax) + '</select></div>';
+        const syncDiffUI = () => {
+            const smin = diffPanel.querySelector('.pp-oj-diff-min');
+            const smax = diffPanel.querySelector('.pp-oj-diff-max');
+            if (smin) smin.value = importDiffMin;
+            if (smax) smax.value = importDiffMax;
+            diffBtn.textContent = importDiffMin === 0 && importDiffMax === DIFF_MAX
+                ? t('oj.diff')
+                : t('oj.diff') + ' ' + difficultyLabel(importDiffMin) + '~' + difficultyLabel(importDiffMax);
+        };
+        diffBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            const show = diffPanel.style.display === 'none';
+            diffPanel.style.display = show ? 'block' : 'none';
+            syncDiffUI();
+        });
+        diffPanel.addEventListener('change', (e) => {
+            const min = parseInt(diffPanel.querySelector('.pp-oj-diff-min').value, 10);
+            const max = parseInt(diffPanel.querySelector('.pp-oj-diff-max').value, 10);
+            importDiffMin = Math.min(min, max);
+            importDiffMax = Math.max(min, max);
+            diffPanel.querySelector('.pp-oj-diff-min').value = importDiffMin;
+            diffPanel.querySelector('.pp-oj-diff-max').value = importDiffMax;
+            syncDiffUI();
+            syncPanelImportUI();
+        });
+
+        trainingBtn.appendChild(main);
+        trainingBtn.appendChild(tagToggle);
+        trainingBtn.appendChild(diffBtn);
+        trainingBtn.appendChild(diffPanel);
         document.body.appendChild(trainingBtn);
+    }
+
+    // 洛谷导入面板的 UI 与共享选项同步（面板打开时调用）
+    function syncPanelImportUI() {
+        const box = panel.querySelector('#pp-luogu-panel');
+        if (!box) return;
+        const ck = box.querySelector('#pp-import-tags');
+        const smin = box.querySelector('#pp-import-diff-min');
+        const smax = box.querySelector('#pp-import-diff-max');
+        if (ck) ck.checked = importWithTags;
+        if (smin) smin.value = importDiffMin;
+        if (smax) smax.value = importDiffMax;
     }
 
     // 从当前题单页解析并批量导入（复用 runBatchImport，进度显示在按钮上）
@@ -2089,24 +3213,24 @@
         const m = location.pathname.match(/^\/training\/(\d+)/);
         if (!m) return;
         btn.disabled = true;
-        btn.textContent = '⏳ 解析题单…';
+        btn.textContent = t('training.parsing');
         try {
             const pids = await importLuoguUrl('https://www.luogu.com.cn/training/' + m[1]);
-            btn.textContent = '⏳ 获取题目信息…';
+            btn.textContent = t('training.fetching');
             const items = pids.map(pid => ({ pid, title: '' }));
             const result = await runBatchImport(items, null, (text) => {
-                btn.textContent = text.replace('正在获取 ', '⏳ ').replace(' …', '');
-            });
-            btn.textContent = '✓ 已导入 ' + result.added + ' 题';
-            showToast('题单导入完成：新增 ' + result.added + ' · 跳过 ' + result.skipped
-                + (result.failures.length ? ' · 失败 ' + result.failures.length : ''), '#52C41A');
+                btn.textContent = '⏳ ' + text;
+            }, { withTags: importWithTags, diffMin: importDiffMin, diffMax: importDiffMax });
+            btn.textContent = t('training.imported', { n: result.added });
+            showToast(t('toast.trainingDone', { a: result.added, s: result.skipped })
+                + (result.failures.length ? t('import.doneFail', { n: result.failures.length }) : ''), '#52C41A');
         } catch (err) {
-            showToast('题单导入失败：' + err.message, '#FE4C61');
-            btn.textContent = '📥 导入整个题单';
+            showToast(t('toast.trainingFail', { e: err.message }), '#FE4C61');
+            btn.textContent = t('training.importAll');
         } finally {
             setTimeout(() => {
                 btn.disabled = false;
-                if (btn.textContent.indexOf('✓') === -1) btn.textContent = '📥 导入整个题单';
+                if (btn.textContent.indexOf('✓') === -1) btn.textContent = t('training.importAll');
             }, 2000);
         }
     }
@@ -2131,10 +3255,10 @@
 
     async function importLuoguUrl(url) {
         const m = String(url).match(/luogu\.com\.cn\/training\/(\d+)/);
-        if (!m) throw new Error('仅支持洛谷题单链接（luogu.com.cn/training/xxx）');
+        if (!m) throw new Error(t('err.onlyTraining'));
         const html = await luoguGet('https://www.luogu.com.cn/training/' + m[1] + '?_contentOnly=1');
         const pids = extractPidsFromHtml(html);
-        if (pids.length === 0) throw new Error('未从题单中解析到题目（请检查链接是否有效）');
+        if (pids.length === 0) throw new Error(t('err.noPids'));
         return pids;
     }
 
@@ -2183,12 +3307,20 @@
 
     // 批量导入（顺序请求，带进度与报错）
     // onStatus: 可选回调，每次请求前调用（progressText 为 '正在获取 i/N：Pxxxx …'）
-    async function runBatchImport(items, statusEl, onStatus) {
+    // opts: { withTags?: boolean, diffMin?: number, diffMax?: number }
+    async function runBatchImport(items, statusEl, onStatus, opts) {
         const existedActive = new Set(problems.map(p => p.url));
         const existedArchive = new Set(archive.map(a => a.url));
         const seen = new Set();
-        let added = 0, skipped = 0;
+        let added = 0, skipped = 0, skippedByDiff = 0;
         const failures = [];
+
+        // 选项：withTags 是否获取标签写入备注；diffMin/diffMax 难度范围（0-8，全选时不过滤）
+        opts = opts || {};
+        const withTags = !!opts.withTags;
+        const diffMin = Number.isInteger(opts.diffMin) ? Math.max(0, Math.min(DIFF_MAX, opts.diffMin)) : 0;
+        const diffMax = Number.isInteger(opts.diffMax) ? Math.max(0, Math.min(DIFF_MAX, opts.diffMax)) : DIFF_MAX;
+        const allDiff = diffMin === 0 && diffMax === DIFF_MAX;
 
         for (let i = 0; i < items.length; i++) {
             const it = items[i];
@@ -2197,24 +3329,35 @@
             if (seen.has(pid)) continue;
             seen.add(pid);
             if (existedActive.has(pUrl) || existedArchive.has(pUrl)) { skipped++; continue; }
-            if (onStatus) onStatus('正在获取 ' + (i + 1) + '/' + items.length + '：' + pid + ' …');
-            else if (statusEl) statusEl.textContent = '正在获取 ' + (i + 1) + '/' + items.length + '：' + pid + ' …';
+            const prog = t('import.fetching', { i: i + 1, n: items.length, pid: pid });
+            if (onStatus) onStatus(prog);
+            else if (statusEl) statusEl.textContent = prog;
             try {
                 let name = it.title || '';
                 let difficulty = null;
+                let tags = [];
                 const info = await fetchLuoguInfo(pid);
                 if (!name) name = info.title;
                 difficulty = info.difficulty;
+                tags = info.tags || [];
+                // 难度范围过滤：无难度题在全选范围时保留，指定范围时跳过
+                if (!allDiff) {
+                    if (difficulty === null || difficulty === undefined) { skippedByDiff++; skipped++; continue; }
+                    if (difficulty < diffMin || difficulty > diffMax) { skippedByDiff++; skipped++; continue; }
+                }
                 // 与一键加入一致：显示名采用「题号 + 题目名」格式（如 P1001 A+B Problem）
                 const displayName = ((pid ? pid + ' ' : '') + (name || '')).trim();
                 // 颜色即难度：洛谷题用难度色
                 const color = difficulty !== null && difficulty !== undefined
                     ? difficultyColor(difficulty)
                     : selectedColor;
+                // 标签开关开启时，按 [tag1];[tag2];[tag3] 格式写入备注
+                const notes = withTags ? mergeTagsToNotes('', tags) : '';
                 problems.push(normalizeProblem({
                     url: pUrl,
                     name: displayName || pid,
                     color,
+                    notes,
                     addedDate: new Date().toISOString(),
                     difficulty
                 }));
@@ -2225,48 +3368,98 @@
         }
         saveData();
         if (statusEl) {
+            const diffNote = skippedByDiff > 0 ? t('import.doneDiff', { d: '<b>' + skippedByDiff + '</b>' }) : '';
             if (failures.length) {
-                statusEl.innerHTML = '导入完成：新增 <b>' + added + '</b> · 跳过 <b>' + skipped + '</b> · 失败 <b style="color:#e5484d">' + failures.length + '</b><br>' +
-                    '<span style="color:#e5484d">失败题目：' + failures.map(f => f.pid).join('、') + '</span>';
+                statusEl.innerHTML = t('import.done', { a: '<b>' + added + '</b>', s: '<b>' + skipped + '</b>' }) + diffNote
+                    + t('import.doneFail', { n: '<b style="color:#e5484d">' + failures.length + '</b>' }) + '<br>'
+                    + '<span style="color:#e5484d">' + t('import.failList', { list: failures.map(f => f.pid).join('、') }) + '</span>';
             } else {
-                statusEl.innerHTML = '导入完成：新增 <b>' + added + '</b> · 跳过 <b>' + skipped + '</b>';
+                statusEl.innerHTML = t('import.done', { a: '<b>' + added + '</b>', s: '<b>' + skipped + '</b>' }) + diffNote;
             }
         }
         renderProblems();
-        return { added, skipped, failures };
+        return { added, skipped, skippedByDiff, failures };
     }
 
     // 洛谷导入 UI 绑定
     function bindLuoguImport() {
+        // 初始化难度范围下拉选项（与共享选项同步）
+        const diffMinSel = panel.querySelector('#pp-import-diff-min');
+        const diffMaxSel = panel.querySelector('#pp-import-diff-max');
+        if (diffMinSel) {
+            diffMinSel.innerHTML = diffSelectOptions(importDiffMin);
+            diffMinSel.addEventListener('change', () => {
+                importDiffMin = parseInt(diffMinSel.value, 10);
+                if (importDiffMin > importDiffMax) { importDiffMax = importDiffMin; diffMaxSel.value = importDiffMax; }
+                syncPanelImportUI();
+                if (trainingBtn) {
+                    const db = trainingBtn.querySelector('.pp-oj-diff-min');
+                    if (db) db.value = importDiffMin;
+                    const db2 = trainingBtn.querySelector('.pp-oj-diff-max');
+                    if (db2) db2.value = importDiffMax;
+                }
+            });
+        }
+        if (diffMaxSel) {
+            diffMaxSel.innerHTML = diffSelectOptions(importDiffMax);
+            diffMaxSel.addEventListener('change', () => {
+                importDiffMax = parseInt(diffMaxSel.value, 10);
+                if (importDiffMax < importDiffMin) { importDiffMin = importDiffMax; diffMinSel.value = importDiffMin; }
+                syncPanelImportUI();
+                if (trainingBtn) {
+                    const db = trainingBtn.querySelector('.pp-oj-diff-min');
+                    if (db) db.value = importDiffMin;
+                    const db2 = trainingBtn.querySelector('.pp-oj-diff-max');
+                    if (db2) db2.value = importDiffMax;
+                }
+            });
+        }
+        const tagsCk = panel.querySelector('#pp-import-tags');
+        if (tagsCk) {
+            tagsCk.addEventListener('change', () => {
+                importWithTags = tagsCk.checked;
+                if (trainingBtn) {
+                    const tgl = trainingBtn.querySelector('.pp-oj-tag-toggle');
+                    if (tgl) {
+                        tgl.classList.toggle('on', importWithTags);
+                        tgl.textContent = importWithTags ? t('oj.tagToggleOn') : t('oj.tagToggle');
+                    }
+                }
+            });
+        }
         panel.querySelector('#pp-import-luogu').addEventListener('click', () => {
             const box = panel.querySelector('#pp-luogu-panel');
             box.classList.toggle('show');
+            syncPanelImportUI();
             refreshHomeImportBtn();
         });
         panel.querySelector('#pp-luogu-start').addEventListener('click', async () => {
             const input = panel.querySelector('#pp-luogu-url');
             const status = panel.querySelector('#pp-luogu-status');
             const url = input.value.trim();
-            if (!url) { alert('请先粘贴洛谷题单链接'); return; }
-            status.textContent = '正在解析题单…';
+            if (!url) { alert(t('alert.enterLuoguUrl')); return; }
+            syncPanelImportUI(); // 同步共享选项到 UI
+            status.textContent = t('import.parsing');
             try {
                 const pids = await importLuoguUrl(url);
-                status.textContent = '解析到 ' + pids.length + ' 道题，开始获取题目信息…';
-                await runBatchImport(pids.map(pid => ({ pid, title: '' })), status);
+                status.textContent = t('import.found', { n: pids.length });
+                await runBatchImport(pids.map(pid => ({ pid, title: '' })), status, null,
+                    { withTags: importWithTags, diffMin: importDiffMin, diffMax: importDiffMax });
             } catch (err) {
-                status.innerHTML = '<span style="color:#e5484d">导入失败：' + err.message + '</span>';
+                status.innerHTML = '<span style="color:#e5484d">' + t('toast.trainingFail', { e: err.message }) + '</span>';
             }
         });
         panel.querySelector('#pp-home-import').addEventListener('click', async () => {
             const status = panel.querySelector('#pp-luogu-status');
             const { items, debug } = extractHomePlanProblems();
             if (!items.length) {
-                status.innerHTML = '<span style="color:#e5484d">未在主页找到任务计划模块，请确认已登录洛谷并打开主页。</span><br>' +
+                status.innerHTML = '<span style="color:#e5484d">' + t('import.noModule') + '</span><br>' +
                     '<span style="color:#8a93b0;font-size:11px">' + (debug.join('<br>') || '') + '</span>';
                 return;
             }
-            status.textContent = '主页任务计划解析到 ' + items.length + ' 道题，开始获取难度…';
-            await runBatchImport(items, status);
+            status.textContent = t('import.homeFound', { n: items.length });
+            await runBatchImport(items, status, null,
+                { withTags: importWithTags, diffMin: importDiffMin, diffMax: importDiffMax });
         });
     }
 
@@ -2274,7 +3467,7 @@
         const btn = panel.querySelector('#pp-home-import');
         const onHome = /^https?:\/\/(www\.)?luogu\.com\.cn\/?$/.test(location.href);
         btn.disabled = !onHome;
-        btn.textContent = onHome ? '从当前洛谷主页任务计划导入' : '需在洛谷主页使用';
+        btn.textContent = onHome ? t('home.importBtn') : t('home.needHome');
     }
 
     // ==================== 事件绑定 ====================
@@ -2287,11 +3480,11 @@
         let name = nameInput.value.trim();
 
         if (!url) { url = window.location.href; urlInput.value = url; }
-        if (!name) { name = (document.title || '').trim() || '未命名题目'; }
+        if (!name) { name = (document.title || '').trim() || t('misc.unnamedProblem'); }
 
-        try { new URL(url); } catch (e) { alert('请输入有效的网址！'); urlInput.focus(); return; }
-        if (problems.some(p => p.url === url)) { alert('此题目已在计划中！'); return; }
-        if (archive.some(a => a.url === url)) { alert('此题目已在已完成记录中，不能重复添加！'); return; }
+        try { new URL(url); } catch (e) { alert(t('alert.invalidUrl')); urlInput.focus(); return; }
+        if (problems.some(p => p.url === url)) { alert(t('toast.alreadyInPlan')); return; }
+        if (archive.some(a => a.url === url)) { alert(t('alert.alreadyDoneAdd')); return; }
 
         problems.push(normalizeProblem({
             url, name, color: selectedColor, addedDate: new Date().toISOString()
@@ -2304,7 +3497,7 @@
 
         const addBtn = panel.querySelector('#pp-add');
         const orig = addBtn.textContent;
-        addBtn.textContent = '添加成功！';
+        addBtn.textContent = t('toast.addSuccess');
         setTimeout(() => { addBtn.textContent = orig; }, 1000);
     });
 
@@ -2319,6 +3512,12 @@
     });
     // 随机一题
     panel.querySelector('#pp-random').addEventListener('click', pickRandomProblem);
+
+    // 备忘录：添加按钮 + 回车添加
+    panel.querySelector('#pp-memo-add').addEventListener('click', addMemo);
+    panel.querySelector('#pp-memo-input').addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') addMemo();
+    });
 
     panel.querySelector('#pp-export').addEventListener('click', exportData);
     panel.querySelector('#pp-import').addEventListener('click', () => panel.querySelector('#pp-file').click());
@@ -2337,6 +3536,10 @@
             loadData();
             loadArchive();
             loadSettings();
+            loadMemos();
+            currentLang = resolveLang();
+            applyStaticI18n();
+            updateMemoCount();
             loadTimerState();
             syncSettingsUI();
             adoptTimerState();
@@ -2363,6 +3566,11 @@
         if (!document.hidden && isPanelVisible) {
             loadData();
             loadArchive();
+            loadSettings();
+            loadMemos();
+            currentLang = resolveLang();
+            applyStaticI18n();
+            updateMemoCount();
             loadTimerState();
             adoptTimerState();
             switchTab(currentTab);
@@ -2371,9 +3579,14 @@
 
     // ==================== 初始化 ====================
 
+    loadSettings();
+    currentLang = resolveLang();
+    applyStaticI18n();
     loadData();
     loadArchive();
-    loadSettings();
+    loadMemos();
+    updateMemoCount();
+    applyTheme(); // 初始化时应用主题（auto/light/dark）
     loadTimerState();
     adoptTimerState();
     startOjWatch();
