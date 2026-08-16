@@ -65,18 +65,6 @@ A **cross-site problem planner** for OI / ACM / algorithm learners. Injected on 
 2. Visit the [GreasyFork page](https://greasyfork.org/scripts/565773) and click Install
 3. Click the floating button at the bottom-left of any page to start managing your problem plan!
 
-![d86b7153-a34f-4ee0-8c6c-05d60a1a8dfc](screenshots/d86b7153-a34f-4ee0-8c6c-05d60a1a8dfc.png)
-
-![744a2726-0ff9-4d7c-887a-a07d0ba33116](screenshots/744a2726-0ff9-4d7c-887a-a07d0ba33116.png)
-
-![e36ac3ae-ef8c-4951-9c97-66c73aa5083c](screenshots/e36ac3ae-ef8c-4951-9c97-66c73aa5083c.png)
-
-![35a2bc07-0f55-4494-8d9d-80e012c02b2d](screenshots/35a2bc07-0f55-4494-8d9d-80e012c02b2d.png)
-
-![43df2e0a-7d40-46e3-a4c8-a81f8f104a98](screenshots/43df2e0a-7d40-46e3-a4c8-a81f8f104a98.png)
-
-![8b746633-e0f8-4b1b-9d55-53742b413b18](screenshots/8b746633-e0f8-4b1b-9d55-53742b413b18.png)
-
 ## 🔧 Development / Contributing
 
 ```bash
