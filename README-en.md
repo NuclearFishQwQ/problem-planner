@@ -81,6 +81,11 @@ node --check 做题计划管理器.user.js
 
 ## 📜 Changelog
 
+### v3.14.x
+
+- v3.14.0: We've changed the way we retrieve question information, which should significantly reduce the number of API calls.
+- v3.14.1：Fixed serveral issues.
+
 ### v3.13.x
 
 - v3.13.1: Added a calendar feature to the memo section. You can now add events to your calendar with a single tap from the competition interface.
