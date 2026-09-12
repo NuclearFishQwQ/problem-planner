@@ -83,6 +83,10 @@ node --check 做题计划管理器.user.js
 
 ## 📜 Changelog
 
+### v3.12.x
+
+- v3.12.0: Now you can skip accepted problems when importing a Luogu training list.
+
 ### v3.11.x
 
 - v3.11.0: Major update. Added dark mode, English i18n, and the memo feature. One-click adding can auto-fetch tags as notes, and one-click training list import can filter by difficulty range.
