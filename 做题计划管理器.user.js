@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         做题计划管理器
 // @namespace    http://tampermonkey.net/
-// @version      3.13.2
-// @description  跨站做题计划管理器 v3.13.2：完成归档、置顶排序、统计图表、题目备注、番茄钟计时、题目搜索、随机一题、自定义颜色（颜色即难度）、每日目标、难度统计、洛谷题单导入、题单页批量导入（可跳过洛谷已通过题目）、题目一键加入（洛谷、AT、CF、UVa，SPOJ暂不支持）。标签自动按「来源/时间/区域/算法/特殊题目」分类排序，洛谷标签支持英文；CF 题目自动附带 CF 标签与难度评分；内置备忘录 + 日历（可手动添加日程、洛谷比赛一键加入、紧急置顶、排序、计数角标）；完整中英文界面（可在设置中切换）。
+// @version      3.14.1
+// @description  跨站做题计划管理器 v3.14.1：完成归档、置顶排序、统计图表、题目备注、番茄钟计时、题目搜索、随机一题、自定义颜色（颜色即难度）、每日目标、难度统计、洛谷题单导入、题单页批量导入（可跳过洛谷已通过题目）、题目一键加入（洛谷、AT、CF、UVa，SPOJ暂不支持）。标签自动按「来源/时间/区域/算法/特殊题目」分类排序，洛谷标签支持英文；CF 题目自动附带 CF 标签与难度评分；内置备忘录 + 日历（可手动添加日程、洛谷比赛一键加入、紧急置顶、排序、计数角标）；完整中英文界面（可在设置中切换）。v3.14.0：新增洛谷本地题库缓存（一次性下载公开题库到本地，导入/一键加入不再逐题请求，大幅降低请求量，避免触发异常访问判定）；批量请求限速；已通过集合与 CF 信息本地缓存。
 // @author       Nuclear_Fish_cyq
 // @match        *://*/*
 // @license      MIT
@@ -13,6 +13,7 @@
 // @grant        GM_xmlhttpRequest
 // @connect      www.luogu.com.cn
 // @connect      luogu.com.cn
+// @connect      cdn.luogu.com.cn
 // @connect      codeforces.com
 // @connect      www.codeforces.com
 // @downloadURL https://update.greasyfork.org/scripts/565773/%E5%81%9A%E9%A2%98%E8%AE%A1%E5%88%92%E7%AE%A1%E7%90%86%E5%99%A8.user.js
@@ -201,6 +202,7 @@
             'err.passedFetch': '获取已通过题目列表失败：{e}，本次导入不跳过已通过题目',
             'err.passedFormat': '洛谷未返回有效数据（可能未登录或接口已变更）',
             'import.parsing': '正在解析题单…', 'import.found': '解析到 {n} 道题，开始获取题目信息…',
+            'import.fetchDb': '⏳ 正在准备洛谷本地题库（首次使用需下载一次，之后导入零请求）…',
             'import.fetchPassed': '正在获取已通过题目列表…',
             'import.noModule': '未在主页找到任务计划模块，请确认已登录洛谷并打开主页。',
             'import.homeFound': '主页任务计划解析到 {n} 道题，开始获取难度…',
@@ -316,6 +318,7 @@
             'err.passedFetch': 'Failed to fetch solved list: {e}; skipping disabled for this import',
             'err.passedFormat': 'Luogu did not return valid data (not logged in or API changed)',
             'import.parsing': 'Parsing training list…', 'import.found': 'Found {n} problems, fetching info…',
+            'import.fetchDb': '⏳ Preparing local Luogu DB (one-time download; later imports use zero requests)…',
             'import.noModule': 'Task plan module not found. Ensure you are logged in on the Luogu homepage.',
             'import.homeFound': 'Found {n} problems in homepage plan, fetching difficulty…',
             'import.fetching': 'Fetching {i}/{n}: {pid} …', 'import.done': 'Import done: added {a} · skipped {s}',
@@ -3372,7 +3375,12 @@
     }
 
     // 获取 CF 题目信息（原生标签 + 难度评分 rating）
+    // 会话级内存缓存：同一题目重复加入/批量导入时不再重复请求
+    const cfInfoCache = new Map(); // 'contest/index' -> { tags, rating }
     async function fetchCFInfo(contest, index) {
+        const cacheKey = contest + '/' + index;
+        const cached = cfInfoCache.get(cacheKey);
+        if (cached) return cached;
         const url = 'https://codeforces.com/api/contest.standings?contestId=' + encodeURIComponent(contest) + '&from=1&count=1';
         const json = await cfGet(url);
         const data = JSON.parse(json);
@@ -3380,22 +3388,238 @@
             throw new Error(t('err.cfFail'));
         }
         const p = data.result.problems.find(x => String(x.index) === String(index));
-        if (!p) return { tags: [], rating: null };
-        return {
-            tags: Array.isArray(p.tags) ? p.tags.slice() : [],
-            rating: (typeof p.rating === 'number' && p.rating > 0) ? p.rating : null
-        };
+        const result = p
+            ? {
+                tags: Array.isArray(p.tags) ? p.tags.slice() : [],
+                rating: (typeof p.rating === 'number' && p.rating > 0) ? p.rating : null
+            }
+            : { tags: [], rating: null };
+        cfInfoCache.set(cacheKey, result);
+        return result;
     }
 
-    // 获取洛谷题目信息（题名 + 难度 + 标签）
+    // ==================== 洛谷本地题库缓存 ====================
+    // 思路（参考洛谷插件 8tmw68af）：一次性下载洛谷公开题库 latest.ndjson.gz，
+    // 解压提取 {pid, title, difficulty, tags} 存 GM 存储（跨站可用）。
+    // 之后 fetchLuoguInfo 优先查本地库，命中则零请求；3 天过期后台静默更新。
+    // 效果：批量导入 100 题从「100 次页面请求」降为「0 次」，彻底规避异常访问判定。
+
+    const LUOGU_DB_KEY = 'problemPlanner_luoguDb';
+    const LUOGU_DB_TTL = 3 * 24 * 3600 * 1000; // 本地题库 3 天过期（后台更新）
+    const LUOGU_DB_URL = 'https://cdn.luogu.com.cn/problemset-open/latest.ndjson.gz';
+    const LUOGU_REQ_MIN_GAP = 400; // 洛谷网络兜底请求最小间隔（毫秒）
+
+    let luoguDb = null;            // 内存 Map：pid -> { title, difficulty, tags }
+    let luoguDbRecords = null;     // 紧凑数组（持久化源）：[pid, title, difficulty, tags]
+    let luoguDbTs = 0;             // 本地库下载时间戳
+    let luoguDbPromise = null;     // 加载/下载中的 Promise（防并发重复下载）
+    let luoguDbUpdateStarted = false; // 后台更新是否已调度
+    let luoguDbSaveTimer = null;   // 增量合并后的延迟保存定时器
+    let lastLuoguReqTime = 0;      // 上次洛谷页面请求时间（限速用）
+
+    // HTML 实体解码（纯字符串实现，避免 2 万条数据逐个走 DOM）
+    function decodeHtmlEntities(str) {
+        return String(str)
+            .replace(/&#x([0-9a-fA-F]+);/g, (m, h) => { try { return String.fromCodePoint(parseInt(h, 16)); } catch (e) { return m; } })
+            .replace(/&#(\d+);/g, (m, d) => { try { return String.fromCodePoint(parseInt(d, 10)); } catch (e) { return m; } })
+            .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+            .replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&nbsp;/g, ' ');
+    }
+
+    // gzip 解压：优先原生 DecompressionStream，不可用时动态加载 pako
+    function ensureGunzip() {
+        if (typeof DecompressionStream !== 'undefined') return Promise.resolve();
+        return new Promise((resolve) => {
+            const s = document.createElement('script');
+            s.src = 'https://cdn.jsdelivr.net/npm/pako@2.1.0/dist/pako.min.js';
+            s.onload = () => resolve();
+            s.onerror = () => resolve(); // 失败也继续，gunzipText 内会抛错
+            document.head.appendChild(s);
+        });
+    }
+
+    async function gunzipText(raw) {
+        if (typeof DecompressionStream !== 'undefined') {
+            const stream = new Blob([raw]).stream().pipeThrough(new DecompressionStream('gzip'));
+            return await new Response(stream).text();
+        }
+        await ensureGunzip();
+        const pako = window.pako || (typeof unsafeWindow !== 'undefined' ? unsafeWindow.pako : null);
+        if (!pako) throw new Error('gunzip unavailable');
+        return pako.ungzip(new Uint8Array(raw), { to: 'string' });
+    }
+
+    // 下载公开题库（一次请求）并解析为紧凑数组
+    async function fetchLuoguDbRaw() {
+        const raw = await new Promise((resolve, reject) => {
+            GM_xmlhttpRequest({
+                method: 'GET',
+                url: LUOGU_DB_URL,
+                responseType: 'arraybuffer',
+                timeout: 60000,
+                onload: (res) => (res.status === 200) ? resolve(res.response) : reject(new Error('HTTP ' + res.status)),
+                onerror: () => reject(new Error('network')),
+                ontimeout: () => reject(new Error('timeout'))
+            });
+        });
+        const text = await gunzipText(raw);
+        const records = [];
+        const lines = text.split('\n');
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            if (!line || !line.trim()) continue;
+            try {
+                const o = JSON.parse(line);
+                if (o && o.pid && typeof o.title === 'string') {
+                    records.push([
+                        o.pid,
+                        decodeHtmlEntities(o.title),
+                        (typeof o.difficulty === 'number' && o.difficulty >= 0 && o.difficulty <= DIFF_MAX) ? o.difficulty : null,
+                        Array.isArray(o.tags) ? o.tags : []
+                    ]);
+                }
+            } catch (e) { /* 单行解析失败跳过 */ }
+        }
+        if (!records.length) throw new Error('empty db');
+        return records;
+    }
+
+    function buildDbMap(records) {
+        const map = new Map();
+        for (let i = 0; i < records.length; i++) {
+            const r = records[i];
+            map.set(r[0], { title: r[1], difficulty: r[2], tags: r[3] });
+        }
+        return map;
+    }
+
+    function saveLuoguDb(records, ts) {
+        try {
+            GM_setValue(LUOGU_DB_KEY, JSON.stringify({ ver: 1, ts: ts || Date.now(), records }));
+        } catch (e) {
+            console.warn('[做题计划] 本地题库写入失败（可能是存储空间不足），下次会重新下载:', e);
+        }
+    }
+
+    function loadLuoguDbFromStorage() {
+        try {
+            const raw = GM_getValue(LUOGU_DB_KEY);
+            if (!raw) return null;
+            const data = JSON.parse(raw);
+            if (data && data.ver === 1 && Array.isArray(data.records) && data.records.length) {
+                return { map: buildDbMap(data.records), records: data.records, ts: data.ts || 0 };
+            }
+        } catch (e) {
+            console.warn('[做题计划] 本地题库读取失败:', e);
+        }
+        return null;
+    }
+
+    // 网络兜底请求成功后，增量沉淀进本地库（延迟 3s 合并保存，避免频繁序列化）
+    function mergeIntoLuoguDb(pid, info) {
+        if (!luoguDb || !luoguDbRecords || !pid) return;
+        const title = info && info.title ? decodeHtmlEntities(info.title) : '';
+        const difficulty = (typeof info.difficulty === 'number' && info.difficulty >= 0 && info.difficulty <= DIFF_MAX) ? info.difficulty : null;
+        luoguDb.set(pid, { title, difficulty, tags: (luoguDb.get(pid) || {}).tags || [] });
+        let found = false;
+        for (let i = 0; i < luoguDbRecords.length; i++) {
+            if (luoguDbRecords[i][0] === pid) {
+                luoguDbRecords[i] = [pid, title, difficulty, (luoguDbRecords[i][3] || [])];
+                found = true;
+                break;
+            }
+        }
+        if (!found) luoguDbRecords.push([pid, title, difficulty, []]);
+        if (luoguDbSaveTimer) clearTimeout(luoguDbSaveTimer);
+        luoguDbSaveTimer = setTimeout(() => { saveLuoguDb(luoguDbRecords, luoguDbTs); }, 3000);
+    }
+
+    // 后台静默更新本地库（不阻塞当前操作）
+    function scheduleLuoguDbUpdate() {
+        if (luoguDbUpdateStarted) return;
+        luoguDbUpdateStarted = true;
+        setTimeout(async () => {
+            try {
+                const records = await fetchLuoguDbRaw();
+                luoguDbRecords = records;
+                luoguDb = buildDbMap(records);
+                luoguDbTs = Date.now();
+                saveLuoguDb(records, luoguDbTs);
+                console.log('[做题计划] 洛谷本地题库已更新:', records.length, '条');
+            } catch (e) {
+                console.warn('[做题计划] 本地题库后台更新失败，继续使用旧数据:', e);
+            } finally {
+                luoguDbUpdateStarted = false;
+            }
+        }, 2000);
+    }
+
+    // 确保本地题库可用：返回 Map（失败时返回 null，调用方走网络兜底）
+    async function ensureLuoguDb() {
+        if (luoguDb && luoguDbRecords) {
+            if (Date.now() - luoguDbTs >= LUOGU_DB_TTL) scheduleLuoguDbUpdate();
+            return luoguDb;
+        }
+        if (luoguDbPromise) return luoguDbPromise;
+        luoguDbPromise = (async () => {
+            try {
+                const saved = loadLuoguDbFromStorage();
+                if (saved && saved.map.size) {
+                    luoguDb = saved.map;
+                    luoguDbRecords = saved.records;
+                    luoguDbTs = saved.ts;
+                    if (Date.now() - luoguDbTs >= LUOGU_DB_TTL) scheduleLuoguDbUpdate();
+                    return luoguDb;
+                }
+                const records = await fetchLuoguDbRaw();
+                luoguDbRecords = records;
+                luoguDb = buildDbMap(records);
+                luoguDbTs = Date.now();
+                saveLuoguDb(records, luoguDbTs);
+                console.log('[做题计划] 洛谷本地题库已下载:', records.length, '条');
+                return luoguDb;
+            } catch (e) {
+                console.warn('[做题计划] 洛谷本地题库不可用，回退逐题网络请求:', e);
+                return null;
+            } finally {
+                luoguDbPromise = null;
+            }
+        })();
+        return luoguDbPromise;
+    }
+
+    // 洛谷页面请求限速（网络兜底路径）：保证相邻请求间隔 ≥ LUOGU_REQ_MIN_GAP + 随机抖动
+    async function luoguThrottle() {
+        const wait = lastLuoguReqTime + LUOGU_REQ_MIN_GAP + Math.random() * 300 - Date.now();
+        lastLuoguReqTime = Date.now() + Math.max(0, wait);
+        if (wait > 0) await new Promise(r => setTimeout(r, wait));
+    }
+
+    // 获取洛谷题目信息（题名 + 难度 + 标签）：优先本地题库，命中零请求
     async function fetchLuoguInfo(luoguPid) {
+        try {
+            const db = await ensureLuoguDb();
+            const hit = db && db.get(luoguPid);
+            if (hit) {
+                return {
+                    title: hit.title || '',
+                    difficulty: hit.difficulty,
+                    tags: (hit.tags || []).map(name => (currentLang === 'en' ? (LUOGU_TAG_EN[name] || name) : name)).slice(0, 6)
+                };
+            }
+        } catch (e) { /* 本地库不可用，走网络兜底 */ }
+        // 网络兜底（本地库未收录的题，如 RMJ 题）：限速后请求，避免连续请求触发风控
+        await luoguThrottle();
         const html = await luoguGet('https://www.luogu.com.cn/problem/' + encodeURIComponent(luoguPid) + '?_contentOnly=1');
         const difficulty = parseLuoguDifficulty(html);
         const title = parseLuoguTitle(html, luoguPid);
         if (difficulty === null && !title) {
             throw new Error(t('err.luoguMissing', { pid: luoguPid }));
         }
-        return { title, difficulty, tags: await parseLuoguTags(html) };
+        const tags = await parseLuoguTags(html);
+        // 增量沉淀标题与难度（tags 为语言转换后的值，不写入本地库）
+        mergeIntoLuoguDb(luoguPid, { title, difficulty });
+        return { title, difficulty, tags };
     }
 
     // ==================== 已通过题目检测 ====================
@@ -3525,6 +3749,11 @@
     // 最近一次 uid 检测诊断（供失败提示展示，不泄露敏感值）
     let lastUidDiag = '';
 
+    // 已通过集合缓存：同一 uid 30 分钟内复用，避免每次导入都请求用户页。
+    // 洛谷通过列表本身刷新也有延迟，30 分钟窗口不影响实际使用。
+    let passedCache = { uid: null, set: null, time: 0 };
+    const PASSED_CACHE_TTL = 30 * 60 * 1000; // 30 分钟
+
     // 获取已通过 pid 集合（一次请求拿到全部；返回 null 表示确实无法确定登录状态）
     async function fetchPassedPids() {
         const parts = [];
@@ -3539,6 +3768,10 @@
         parts.push('cookie=' + (document.cookie.match(/(?:^|;\s*)_uid=/) ? '有' : '无'));
         lastUidDiag = parts.join(' ');
         if (!uid) return null;
+        // 命中缓存直接返回（uid 匹配且未过期）
+        if (passedCache.uid === uid && passedCache.set && (Date.now() - passedCache.time) < PASSED_CACHE_TTL) {
+            return passedCache.set;
+        }
         // 新版接口需 x-lentille-request 头才返回 JSON（响应结构为 {data:{passed:[...]}}）
         const raw = await luoguGet(
             'https://www.luogu.com.cn/user/' + encodeURIComponent(uid) + '/practice?_contentOnly=1',
@@ -3553,7 +3786,9 @@
         // 兼容新版 LentilleDataResponse（data）与旧版 DataResponse（currentData）
         const d = (data && (data.data || data.currentData)) || {};
         const passed = Array.isArray(d.passed) ? d.passed : [];
-        return new Set(passed.map(x => x && x.pid).filter(Boolean));
+        const set = new Set(passed.map(x => x && x.pid).filter(Boolean));
+        passedCache = { uid, set, time: Date.now() };
+        return set;
     }
 
     // 一键加入（从当前 OJ 页面）
@@ -4027,6 +4262,16 @@
                 showToast(t('err.passedFetch', { e: err.message }), '#F39C11');
                 passedSet = null;
             }
+        }
+
+        // 预热洛谷本地题库：首次使用时一次性下载公开题库，
+        // 之后逐题信息全部本地命中，不再逐题请求洛谷页面（规避异常访问判定）
+        if (onStatus) onStatus(t('import.fetchDb'));
+        else if (statusEl) statusEl.textContent = t('import.fetchDb');
+        try {
+            await ensureLuoguDb();
+        } catch (e) {
+            console.warn('[做题计划] 本地题库预热失败，将走网络兜底:', e);
         }
 
         for (let i = 0; i < items.length; i++) {
