@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         做题计划管理器
 // @namespace    http://tampermonkey.net/
-// @version      3.11.0
-// @description  跨站做题计划管理器 v3.11.0：完成归档、置顶排序、统计图表、题目备注、番茄钟计时、题目搜索、随机一题、自定义颜色（颜色即难度）、每日目标、难度统计、洛谷题单导入、题单页批量导入、题目一键加入（洛谷、AT、CF、UVa，SPOJ暂不支持）。标签自动按「来源/时间/区域/算法/特殊题目」分类排序，洛谷标签支持英文；CF 题目自动附带 CF 标签与难度评分；内置备忘录（紧急置顶、排序、计数角标）；完整中英文界面（可在设置中切换）。
+// @version      3.12.0
+// @description  跨站做题计划管理器 v3.12.0：完成归档、置顶排序、统计图表、题目备注、番茄钟计时、题目搜索、随机一题、自定义颜色（颜色即难度）、每日目标、难度统计、洛谷题单导入、题单页批量导入（可跳过洛谷已通过题目）、题目一键加入（洛谷、AT、CF、UVa，SPOJ暂不支持）。标签自动按「来源/时间/区域/算法/特殊题目」分类排序，洛谷标签支持英文；CF 题目自动附带 CF 标签与难度评分；内置备忘录（紧急置顶、排序、计数角标）；完整中英文界面（可在设置中切换）。
 // @author       Nuclear_Fish_cyq
 // @match        *://*/*
 // @license      MIT
@@ -107,8 +107,10 @@
             'backup.note': '导出包含进行中、已完成归档、备注、计时统计（v3 格式）',
             'backup.filename': '做题计划备份',
             'luogu.urlLabel': '洛谷题单 / 做题计划链接',
+            'luogu.uidLabel': '洛谷 UID', 'luogu.uidTitle': '可选：填写你的洛谷用户编号（个人主页 user/ 后面的数字）。填写后「跳过已通过」不依赖登录检测，跨站也能用', 'luogu.uidPlaceholder': '如 670355（可选）',
             'luogu.tagsLabel': '🏷 添加标签', 'luogu.tagsTitle': '导入时自动获取题目标签写入备注',
             'luogu.diffLabel': '难度', 'luogu.diffTitle': '只导入该难度范围内的题目',
+            'luogu.skipPassedLabel': '✅ 跳过已通过', 'luogu.skipPassedTitle': '导入时跳过洛谷上已通过的题目',
             'luogu.start': '开始导入题单', 'luogu.homeImport': '从当前洛谷主页任务计划导入',
             'settings.focus': '专注时长', 'settings.minutes': '分钟', 'settings.break': '休息时长',
             'settings.autoBreak': '自动休息', 'settings.autoBreakDesc': '专注结束后自动开始休息',
@@ -171,6 +173,7 @@
             'toast.addedTags': ' · 标签 {n} 个',
             'toast.alreadyInPlan': '此题目已在计划中！', 'toast.alreadyDone': '此题目已在已完成记录中！',
             'toast.tagsOn': '已开启：加入时自动获取标签写入备注', 'toast.tagsOff': '已关闭：加入时不获取标签',
+            'toast.skipPassedOn': '已开启：导入时跳过已通过题目', 'toast.skipPassedOff': '已关闭：导入时不跳过已通过题目',
             'toast.goalDone': '🎯 今日目标 {g} 题已达成！太棒了', 'toast.archived': '已归档 🎉 · 今日 {t}/{g}', 'toast.archivedPlain': '已归档 🎉',
             'alert.invalidUrl': '请输入有效的网址！', 'alert.alreadyDoneAdd': '此题目已在已完成记录中，不能重复添加！',
             'alert.readFail': '读取文件失败，请重试', 'alert.fetchFail': '获取题目信息失败：{e}\n\n题目未加入。',
@@ -183,16 +186,22 @@
             'err.onlyTraining': '仅支持洛谷题单链接（luogu.com.cn/training/xxx）',
             'err.noPids': '未从题单中解析到题目（请检查链接是否有效）',
             'err.cfFail': '获取 CF 题目信息失败',
+            'err.passedFetch': '获取已通过题目列表失败：{e}，本次导入不跳过已通过题目',
+            'err.passedFormat': '洛谷未返回有效数据（可能未登录或接口已变更）',
             'import.parsing': '正在解析题单…', 'import.found': '解析到 {n} 道题，开始获取题目信息…',
+            'import.fetchPassed': '正在获取已通过题目列表…',
             'import.noModule': '未在主页找到任务计划模块，请确认已登录洛谷并打开主页。',
             'import.homeFound': '主页任务计划解析到 {n} 道题，开始获取难度…',
             'import.fetching': '正在获取 {i}/{n}：{pid} …', 'import.done': '导入完成：新增 {a} · 跳过 {s}',
             'import.doneDiff': ' · 难度不符 {d}', 'import.doneFail': ' · 失败 {n}', 'import.failList': '失败题目：{list}',
+            'import.donePassed': ' · 已通过跳过 {n}',
+            'import.passedSkipDisabled': '未检测到洛谷登录状态，本次导入不跳过已通过题目（请在洛谷页面使用）',
             'toast.trainingDone': '题单导入完成：新增 {a} · 跳过 {s}', 'toast.trainingFail': '题单导入失败：{e}',
             'oj.fetching': '⏳ 获取中…', 'oj.addBtn': '＋ 加入做题计划', 'oj.addBtnTitle': '获取洛谷 RMJ 难度并加入做题计划',
             'oj.joined': '✓ 已加入', 'oj.tagToggle': '🏷 标签', 'oj.tagToggleOn': '🏷 标签 ✓',
             'oj.tagToggleTitle': '点击切换：是否自动获取题目标签写入备注（当前：{s}）', 'oj.on': '开', 'oj.off': '关',
             'oj.diff': '🎚 难度', 'oj.diffTitle': '选择加入题目的难度范围', 'oj.diffMin': '最低', 'oj.diffMax': '最高',
+            'oj.skipPassed': '⏭ 已通过', 'oj.skipPassedOn': '⏭ 已通过 ✓', 'oj.skipPassedTitle': '点击切换：导入时跳过洛谷上已通过的题目（当前：{s}）',
             'training.importAll': '📥 导入整个题单', 'training.importAllTitle': '将当前洛谷题单的所有题目批量加入做题计划',
             'training.parsing': '⏳ 解析题单…', 'training.fetching': '⏳ 获取题目信息…', 'training.imported': '✓ 已导入 {n} 题',
             'home.importBtn': '从当前洛谷主页任务计划导入', 'home.needHome': '需在洛谷主页使用'
@@ -214,6 +223,7 @@
             'luogu.urlLabel': 'Luogu Training List URL',
             'luogu.tagsLabel': '🏷 Add Tags', 'luogu.tagsTitle': 'Auto-fetch problem tags into notes',
             'luogu.diffLabel': 'Difficulty', 'luogu.diffTitle': 'Only import problems in this difficulty range',
+            'luogu.skipPassedLabel': '✅ Skip solved', 'luogu.skipPassedTitle': 'Skip problems already solved on Luogu',
             'luogu.start': 'Start Import', 'luogu.homeImport': 'Import from Luogu homepage task plan',
             'settings.focus': 'Focus length', 'settings.minutes': 'min', 'settings.break': 'Break length',
             'settings.autoBreak': 'Auto break', 'settings.autoBreakDesc': 'Auto start break after focus',
@@ -276,6 +286,7 @@
             'toast.addedTags': ' · {n} tags',
             'toast.alreadyInPlan': 'Already in your plan!', 'toast.alreadyDone': 'Already in completed records!',
             'toast.tagsOn': 'On: auto-fetch tags into notes', 'toast.tagsOff': 'Off: tags not fetched',
+            'toast.skipPassedOn': 'On: skip solved problems', 'toast.skipPassedOff': 'Off: solved problems not skipped',
             'toast.goalDone': '🎯 Daily goal {g} reached! Great job', 'toast.archived': 'Archived 🎉 · today {t}/{g}', 'toast.archivedPlain': 'Archived 🎉',
             'alert.invalidUrl': 'Please enter a valid URL!', 'alert.alreadyDoneAdd': 'Already in completed records!',
             'alert.readFail': 'Failed to read file, please retry', 'alert.fetchFail': 'Failed to fetch problem info: {e}\n\nNot added.',
@@ -288,16 +299,21 @@
             'err.onlyTraining': 'Only Luogu training list links are supported (luogu.com.cn/training/xxx)',
             'err.noPids': 'No problems parsed from the training list (check the link)',
             'err.cfFail': 'Failed to fetch CF problem info',
+            'err.passedFetch': 'Failed to fetch solved list: {e}; skipping disabled for this import',
+            'err.passedFormat': 'Luogu did not return valid data (not logged in or API changed)',
             'import.parsing': 'Parsing training list…', 'import.found': 'Found {n} problems, fetching info…',
             'import.noModule': 'Task plan module not found. Ensure you are logged in on the Luogu homepage.',
             'import.homeFound': 'Found {n} problems in homepage plan, fetching difficulty…',
             'import.fetching': 'Fetching {i}/{n}: {pid} …', 'import.done': 'Import done: added {a} · skipped {s}',
             'import.doneDiff': ' · difficulty mismatch {d}', 'import.doneFail': ' · failed {n}', 'import.failList': 'Failed: {list}',
+            'import.donePassed': ' · skipped solved {n}',
+            'import.passedSkipDisabled': 'Not logged in on Luogu; solved problems will not be skipped (use this on a Luogu page)',
             'toast.trainingDone': 'Import done: added {a} · skipped {s}', 'toast.trainingFail': 'Import failed: {e}',
             'oj.fetching': '⏳ Fetching…', 'oj.addBtn': '＋ Add to plan', 'oj.addBtnTitle': 'Fetch Luogu RMJ difficulty and add to plan',
             'oj.joined': '✓ Added', 'oj.tagToggle': '🏷 Tags', 'oj.tagToggleOn': '🏷 Tags ✓',
             'oj.tagToggleTitle': 'Toggle: auto-fetch tags into notes (current: {s})', 'oj.on': 'on', 'oj.off': 'off',
             'oj.diff': '🎚 Difficulty', 'oj.diffTitle': 'Choose difficulty range', 'oj.diffMin': 'Min', 'oj.diffMax': 'Max',
+            'oj.skipPassed': '⏭ Solved', 'oj.skipPassedOn': '⏭ Solved ✓', 'oj.skipPassedTitle': 'Toggle: skip problems already solved on Luogu (current: {s})',
             'training.importAll': '📥 Import whole list', 'training.importAllTitle': 'Add all problems in this training list',
             'training.parsing': '⏳ Parsing…', 'training.fetching': '⏳ Fetching info…', 'training.imported': '✓ Imported {n}',
             'home.importBtn': 'Import from homepage task plan', 'home.needHome': 'Only on Luogu homepage'
@@ -1414,6 +1430,9 @@
                 <div class="pp-luogu-opts">
                     <label class="pp-luogu-opt" data-i18n-title="luogu.tagsTitle" title="导入时自动获取题目标签写入备注">
                         <input type="checkbox" id="pp-import-tags"> <span data-i18n="luogu.tagsLabel">🏷 添加标签</span>
+                    </label>
+                    <label class="pp-luogu-opt" data-i18n-title="luogu.skipPassedTitle" title="导入时跳过洛谷上已通过的题目">
+                        <input type="checkbox" id="pp-import-skip-passed"> <span data-i18n="luogu.skipPassedLabel">✅ 跳过已通过</span>
                     </label>
                     <label class="pp-luogu-opt" data-i18n-title="luogu.diffTitle" title="只导入该难度范围内的题目">
                         <span data-i18n="luogu.diffLabel">难度</span>
@@ -2914,12 +2933,13 @@
         return cleanLuoguTitle(decodeHTML(m[1]), pid);
     }
 
-    // GM_xmlhttpRequest GET 封装
-    function luoguGet(url) {
+    // GM_xmlhttpRequest GET 封装（headers 可选：洛谷新版接口需 x-lentille-request: content-only 才返回 JSON）
+    function luoguGet(url, headers) {
         return new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
                 method: 'GET',
                 url,
+                headers: headers || {},
                 timeout: 12000,
                 onload: (res) => {
                     if (res.status !== 200) { reject(new Error(t('err.luoguStatus', { s: res.status }))); return; }
@@ -2973,6 +2993,164 @@
             throw new Error(t('err.luoguMissing', { pid: luoguPid }));
         }
         return { title, difficulty, tags: await parseLuoguTags(html) };
+    }
+
+    // ==================== 已通过题目检测 ====================
+
+    // 从 lentille-context JSON 中提取 currentUser.uid（洛谷新版页面注入方式：
+    // <script id="lentille-context" type="application/json">{"instance":...,"currentUser":{...}}</script>）
+    function uidFromLentilleJson(jsonText) {
+        try {
+            const json = JSON.parse(jsonText);
+            const cu = (json && json.currentUser) || (json && json.data && json.data.currentUser);
+            if (cu && cu.uid) return String(cu.uid);
+        } catch (e) { /* ignore */ }
+        return null;
+    }
+
+    // DOM 兜底：从导航栏头像/用户链接提取当前用户 uid。
+    // 洛谷新版登录 cookie 为 httpOnly（document.cookie 读不到）、SSR 数据不含 currentUser，
+    // 但登录态导航栏必有用户头像（usericon/{uid}.png）与 /user/{uid} 链接。
+    function uidFromDom() {
+        try {
+            // 未登录标志：导航栏存在登录/注册入口 → 直接判定未登录
+            const loginBtn = document.querySelector('a[href*="auth/login"], [href="/auth/login"]');
+            if (loginBtn) return null;
+            const avatarUids = [];
+            const linkUids = [];
+            document.querySelectorAll('img[src*="usericon"]').forEach(img => {
+                const m = String(img.getAttribute('src') || '').match(/usericon\/(\d+)\./);
+                if (m && m[1] !== '1') avatarUids.push(m[1]); // 排除未登录占位头像 uid=1
+            });
+            document.querySelectorAll('a[href^="/user/"]').forEach(a => {
+                const m = (a.getAttribute('href') || '').match(/^\/user\/(\d+)/);
+                if (m && m[1] !== '1') linkUids.push(m[1]);
+            });
+            // 头像 uid 与链接 uid 一致 → 高置信
+            if (avatarUids.length && linkUids.includes(avatarUids[0])) return avatarUids[0];
+            // 链接中出现 ≥2 次的 uid（导航栏多处用户链接）
+            if (linkUids.length) {
+                const counts = {};
+                linkUids.forEach(u => { counts[u] = (counts[u] || 0) + 1; });
+                let best = null, bestC = 0;
+                Object.keys(counts).forEach(u => { if (counts[u] > bestC) { best = u; bestC = counts[u]; } });
+                if (bestC >= 2) return best;
+            }
+            // 仅头像场景（题单页等）
+            if (avatarUids.length) return avatarUids[0];
+        } catch (e) { /* ignore */ }
+        return null;
+    }
+
+    // 当前登录洛谷用户 uid：
+    // 1) 页面 lentille-context JSON（新版 SSR 数据，登录态时含 currentUser）
+    // 2) DOM 头像/用户链接（导航栏，跨注入方式失效时兜底）
+    // 3) 页面注入 _feInjection / _feInstance（旧版兜底）
+    // 4) cookie _uid（旧版兜底）
+    function getLuoguUid() {
+        try {
+            const el = document.getElementById('lentille-context');
+            if (el) {
+                const uid = uidFromLentilleJson(el.textContent);
+                if (uid) return uid;
+            }
+        } catch (e) { /* ignore */ }
+        try {
+            const uid = uidFromDom();
+            if (uid) return uid;
+        } catch (e) { /* ignore */ }
+        try {
+            const fe = window._feInjection || (typeof unsafeWindow !== 'undefined' && unsafeWindow._feInjection);
+            if (fe && fe.currentUser && fe.currentUser.uid) return String(fe.currentUser.uid);
+        } catch (e) { /* ignore */ }
+        try {
+            const inst = window._feInstance || (typeof unsafeWindow !== 'undefined' && unsafeWindow._feInstance);
+            if (inst && inst.currentUser && inst.currentUser.uid) return String(inst.currentUser.uid);
+        } catch (e) { /* ignore */ }
+        const m = document.cookie.match(/(?:^|;\s*)_uid=(\d+)/);
+        if (m) return m[1];
+        return null;
+    }
+
+    // uid 缓存（跨站场景下避免每次导入都请求洛谷页面）
+    let cachedUid = null;
+    let cachedUidTime = 0;
+    const UID_CACHE_TTL = 30 * 60 * 1000; // 30 分钟
+
+    // 通过 GM_xmlhttpRequest 请求洛谷页面 HTML（自动携带洛谷登录 cookie），
+    // 从服务端渲染的 currentUser 数据中解析 uid。跨站/页面注入失败时兜底。
+    async function fetchUidFromLuoguPage() {
+        if (cachedUid && Date.now() - cachedUidTime < UID_CACHE_TTL) return cachedUid;
+        const candidates = [];
+        const host = location.hostname.toLowerCase();
+        if (host === 'www.luogu.com.cn' || host === 'luogu.com.cn') {
+            // 当前就在洛谷页面：请求当前页面自身，服务端渲染必含登录态数据
+            candidates.push(location.origin + location.pathname);
+        }
+        candidates.push('https://www.luogu.com.cn/');
+        candidates.push('https://luogu.com.cn/');
+        for (const url of candidates) {
+            try {
+                const raw = await luoguGet(url);
+                const src = String(raw);
+                // 主路径：解析 lentille-context JSON（洛谷新版 SSR 注入）
+                const lc = src.match(/<script[^>]*id=["']lentille-context["'][^>]*>([\s\S]*?)<\/script>/);
+                if (lc) {
+                    const uid = uidFromLentilleJson(lc[1]);
+                    if (uid) {
+                        cachedUid = uid;
+                        cachedUidTime = Date.now();
+                        return cachedUid;
+                    }
+                }
+                // 兜底：兼容 JSON（带引号）与 JS 字面量（不带引号）两种注入形式
+                const cu = src.search(/currentUser["']?\s*:\s*\{/);
+                if (cu !== -1) {
+                    const seg = src.substring(cu, cu + 3000);
+                    const um = seg.match(/["']?uid["']?\s*:\s*(\d+)/);
+                    if (um) {
+                        cachedUid = um[1];
+                        cachedUidTime = Date.now();
+                        return cachedUid;
+                    }
+                }
+            } catch (e) { /* 尝试下一个候选 */ }
+        }
+        return null;
+    }
+
+    // 最近一次 uid 检测诊断（供失败提示展示，不泄露敏感值）
+    let lastUidDiag = '';
+
+    // 获取已通过 pid 集合（一次请求拿到全部；返回 null 表示确实无法确定登录状态）
+    async function fetchPassedPids() {
+        const parts = [];
+        const host = location.hostname.toLowerCase();
+        parts.push('页面=' + (host.indexOf('luogu.com.cn') !== -1 ? host : host));
+        let uid = getLuoguUid();
+        parts.push('注入=' + (uid ? 'ok' : '无'));
+        if (!uid) {
+            uid = await fetchUidFromLuoguPage();
+            parts.push('HTML解析=' + (uid ? 'ok' : '无'));
+        }
+        parts.push('cookie=' + (document.cookie.match(/(?:^|;\s*)_uid=/) ? '有' : '无'));
+        lastUidDiag = parts.join(' ');
+        if (!uid) return null;
+        // 新版接口需 x-lentille-request 头才返回 JSON（响应结构为 {data:{passed:[...]}}）
+        const raw = await luoguGet(
+            'https://www.luogu.com.cn/user/' + encodeURIComponent(uid) + '/practice?_contentOnly=1',
+            { 'x-lentille-request': 'content-only', 'referer': 'https://www.luogu.com.cn/' }
+        );
+        let data;
+        try {
+            data = JSON.parse(raw);
+        } catch (e) {
+            throw new Error(t('err.passedFormat'));
+        }
+        // 兼容新版 LentilleDataResponse（data）与旧版 DataResponse（currentData）
+        const d = (data && (data.data || data.currentData)) || {};
+        const passed = Array.isArray(d.passed) ? d.passed : [];
+        return new Set(passed.map(x => x && x.pid).filter(Boolean));
     }
 
     // 一键加入（从当前 OJ 页面）
@@ -3107,6 +3285,7 @@
     let importWithTags = false;  // 是否自动获取标签写入备注
     let importDiffMin = 0;       // 难度范围下限（0-8）
     let importDiffMax = DIFF_MAX; // 难度范围上限（0-8）
+    let importSkipPassed = false; // 是否跳过洛谷上已通过的题目
 
     // 难度范围 UI 同步（select 元素 value 使用 DIFFICULTY_META 索引）
     function diffSelectOptions(selected) {
@@ -3189,9 +3368,28 @@
             syncPanelImportUI();
         });
 
+        // 跳过已通过开关：导入时跳过洛谷上已通过的题目
+        const skipToggle = document.createElement('button');
+        skipToggle.className = 'pp-oj-tag-toggle pp-oj-skip-toggle';
+        skipToggle.title = t('oj.skipPassedTitle', { s: t('oj.off') });
+        const syncSkipUI = () => {
+            skipToggle.classList.toggle('on', importSkipPassed);
+            skipToggle.textContent = importSkipPassed ? t('oj.skipPassedOn') : t('oj.skipPassed');
+            skipToggle.title = t('oj.skipPassedTitle', { s: importSkipPassed ? t('oj.on') : t('oj.off') });
+        };
+        syncSkipUI();
+        skipToggle.addEventListener('click', (e) => {
+            e.preventDefault();
+            importSkipPassed = !importSkipPassed;
+            syncSkipUI();
+            syncPanelImportUI();
+            showToast(importSkipPassed ? t('toast.skipPassedOn') : t('toast.skipPassedOff'), importSkipPassed ? '#52C41A' : '#9aa3bf');
+        });
+
         trainingBtn.appendChild(main);
         trainingBtn.appendChild(tagToggle);
         trainingBtn.appendChild(diffBtn);
+        trainingBtn.appendChild(skipToggle);
         trainingBtn.appendChild(diffPanel);
         document.body.appendChild(trainingBtn);
     }
@@ -3201,9 +3399,11 @@
         const box = panel.querySelector('#pp-luogu-panel');
         if (!box) return;
         const ck = box.querySelector('#pp-import-tags');
+        const ck2 = box.querySelector('#pp-import-skip-passed');
         const smin = box.querySelector('#pp-import-diff-min');
         const smax = box.querySelector('#pp-import-diff-max');
         if (ck) ck.checked = importWithTags;
+        if (ck2) ck2.checked = importSkipPassed;
         if (smin) smin.value = importDiffMin;
         if (smax) smax.value = importDiffMax;
     }
@@ -3220,9 +3420,10 @@
             const items = pids.map(pid => ({ pid, title: '' }));
             const result = await runBatchImport(items, null, (text) => {
                 btn.textContent = '⏳ ' + text;
-            }, { withTags: importWithTags, diffMin: importDiffMin, diffMax: importDiffMax });
+            }, { withTags: importWithTags, diffMin: importDiffMin, diffMax: importDiffMax, skipPassed: importSkipPassed });
             btn.textContent = t('training.imported', { n: result.added });
             showToast(t('toast.trainingDone', { a: result.added, s: result.skipped })
+                + (result.skippedByPassed ? t('import.donePassed', { n: result.skippedByPassed }) : '')
                 + (result.failures.length ? t('import.doneFail', { n: result.failures.length }) : ''), '#52C41A');
         } catch (err) {
             showToast(t('toast.trainingFail', { e: err.message }), '#FE4C61');
@@ -3307,20 +3508,48 @@
 
     // 批量导入（顺序请求，带进度与报错）
     // onStatus: 可选回调，每次请求前调用（progressText 为 '正在获取 i/N：Pxxxx …'）
-    // opts: { withTags?: boolean, diffMin?: number, diffMax?: number }
+    // opts: { withTags?: boolean, diffMin?: number, diffMax?: number, skipPassed?: boolean }
     async function runBatchImport(items, statusEl, onStatus, opts) {
         const existedActive = new Set(problems.map(p => p.url));
         const existedArchive = new Set(archive.map(a => a.url));
         const seen = new Set();
-        let added = 0, skipped = 0, skippedByDiff = 0;
+        let added = 0, skipped = 0, skippedByDiff = 0, skippedByPassed = 0;
         const failures = [];
 
-        // 选项：withTags 是否获取标签写入备注；diffMin/diffMax 难度范围（0-8，全选时不过滤）
+        // 选项：withTags 是否获取标签写入备注；diffMin/diffMax 难度范围（0-8，全选时不过滤）；skipPassed 跳过洛谷已通过题目
         opts = opts || {};
         const withTags = !!opts.withTags;
+        const skipPassed = !!opts.skipPassed;
         const diffMin = Number.isInteger(opts.diffMin) ? Math.max(0, Math.min(DIFF_MAX, opts.diffMin)) : 0;
         const diffMax = Number.isInteger(opts.diffMax) ? Math.max(0, Math.min(DIFF_MAX, opts.diffMax)) : DIFF_MAX;
         const allDiff = diffMin === 0 && diffMax === DIFF_MAX;
+
+        // 跳过已通过：开启时获取当前洛谷用户的已通过 pid 集合（一次请求）
+        // 未登录（返回 null）或获取失败时不中断导入，仅提示本次不跳过
+        let passedSet = null;
+        if (skipPassed) {
+            try {
+                if (onStatus) onStatus(t('import.fetchPassed'));
+                else if (statusEl) statusEl.textContent = t('import.fetchPassed');
+                const set = await fetchPassedPids();
+                if (set === null) {
+                    // 未检测到登录状态：提示（附诊断）后继续导入，本次不跳过
+                    showToast(t('import.passedSkipDisabled') + ' [' + lastUidDiag + ']', '#F39C11');
+                    console.debug('[做题计划][跳过已通过诊断]', {
+                        host: location.hostname,
+                        lentilleContext: !!document.getElementById('lentille-context'),
+                        feInjection: !!(window._feInjection || (typeof unsafeWindow !== 'undefined' && unsafeWindow._feInjection)),
+                        feInstance: !!(window._feInstance || (typeof unsafeWindow !== 'undefined' && unsafeWindow._feInstance)),
+                        cookieUid: /(?:^|;\s*)_uid=/.test(document.cookie),
+                        diag: lastUidDiag
+                    });
+                }
+                passedSet = set;
+            } catch (err) {
+                showToast(t('err.passedFetch', { e: err.message }), '#F39C11');
+                passedSet = null;
+            }
+        }
 
         for (let i = 0; i < items.length; i++) {
             const it = items[i];
@@ -3329,6 +3558,7 @@
             if (seen.has(pid)) continue;
             seen.add(pid);
             if (existedActive.has(pUrl) || existedArchive.has(pUrl)) { skipped++; continue; }
+            if (passedSet && passedSet.has(pid)) { skippedByPassed++; continue; }
             const prog = t('import.fetching', { i: i + 1, n: items.length, pid: pid });
             if (onStatus) onStatus(prog);
             else if (statusEl) statusEl.textContent = prog;
@@ -3369,16 +3599,17 @@
         saveData();
         if (statusEl) {
             const diffNote = skippedByDiff > 0 ? t('import.doneDiff', { d: '<b>' + skippedByDiff + '</b>' }) : '';
+            const passedNote = skippedByPassed > 0 ? t('import.donePassed', { n: '<b>' + skippedByPassed + '</b>' }) : '';
             if (failures.length) {
-                statusEl.innerHTML = t('import.done', { a: '<b>' + added + '</b>', s: '<b>' + skipped + '</b>' }) + diffNote
+                statusEl.innerHTML = t('import.done', { a: '<b>' + added + '</b>', s: '<b>' + skipped + '</b>' }) + diffNote + passedNote
                     + t('import.doneFail', { n: '<b style="color:#e5484d">' + failures.length + '</b>' }) + '<br>'
                     + '<span style="color:#e5484d">' + t('import.failList', { list: failures.map(f => f.pid).join('、') }) + '</span>';
             } else {
-                statusEl.innerHTML = t('import.done', { a: '<b>' + added + '</b>', s: '<b>' + skipped + '</b>' }) + diffNote;
+                statusEl.innerHTML = t('import.done', { a: '<b>' + added + '</b>', s: '<b>' + skipped + '</b>' }) + diffNote + passedNote;
             }
         }
         renderProblems();
-        return { added, skipped, skippedByDiff, failures };
+        return { added, skipped, skippedByDiff, skippedByPassed, failures };
     }
 
     // 洛谷导入 UI 绑定
@@ -3427,6 +3658,19 @@
                 }
             });
         }
+        const skipCk = panel.querySelector('#pp-import-skip-passed');
+        if (skipCk) {
+            skipCk.addEventListener('change', () => {
+                importSkipPassed = skipCk.checked;
+                if (trainingBtn) {
+                    const tgl = trainingBtn.querySelector('.pp-oj-skip-toggle');
+                    if (tgl) {
+                        tgl.classList.toggle('on', importSkipPassed);
+                        tgl.textContent = importSkipPassed ? t('oj.skipPassedOn') : t('oj.skipPassed');
+                    }
+                }
+            });
+        }
         panel.querySelector('#pp-import-luogu').addEventListener('click', () => {
             const box = panel.querySelector('#pp-luogu-panel');
             box.classList.toggle('show');
@@ -3444,7 +3688,7 @@
                 const pids = await importLuoguUrl(url);
                 status.textContent = t('import.found', { n: pids.length });
                 await runBatchImport(pids.map(pid => ({ pid, title: '' })), status, null,
-                    { withTags: importWithTags, diffMin: importDiffMin, diffMax: importDiffMax });
+                    { withTags: importWithTags, diffMin: importDiffMin, diffMax: importDiffMax, skipPassed: importSkipPassed });
             } catch (err) {
                 status.innerHTML = '<span style="color:#e5484d">' + t('toast.trainingFail', { e: err.message }) + '</span>';
             }
@@ -3459,7 +3703,7 @@
             }
             status.textContent = t('import.homeFound', { n: items.length });
             await runBatchImport(items, status, null,
-                { withTags: importWithTags, diffMin: importDiffMin, diffMax: importDiffMax });
+                { withTags: importWithTags, diffMin: importDiffMin, diffMax: importDiffMax, skipPassed: importSkipPassed });
         });
     }
 
