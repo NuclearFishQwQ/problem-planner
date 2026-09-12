@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         做题计划管理器
 // @namespace    http://tampermonkey.net/
-// @version      3.12.0
-// @description  跨站做题计划管理器 v3.12.0：完成归档、置顶排序、统计图表、题目备注、番茄钟计时、题目搜索、随机一题、自定义颜色（颜色即难度）、每日目标、难度统计、洛谷题单导入、题单页批量导入（可跳过洛谷已通过题目）、题目一键加入（洛谷、AT、CF、UVa，SPOJ暂不支持）。标签自动按「来源/时间/区域/算法/特殊题目」分类排序，洛谷标签支持英文；CF 题目自动附带 CF 标签与难度评分；内置备忘录（紧急置顶、排序、计数角标）；完整中英文界面（可在设置中切换）。
+// @version      3.13.2
+// @description  跨站做题计划管理器 v3.13.2：完成归档、置顶排序、统计图表、题目备注、番茄钟计时、题目搜索、随机一题、自定义颜色（颜色即难度）、每日目标、难度统计、洛谷题单导入、题单页批量导入（可跳过洛谷已通过题目）、题目一键加入（洛谷、AT、CF、UVa，SPOJ暂不支持）。标签自动按「来源/时间/区域/算法/特殊题目」分类排序，洛谷标签支持英文；CF 题目自动附带 CF 标签与难度评分；内置备忘录 + 日历（可手动添加日程、洛谷比赛一键加入、紧急置顶、排序、计数角标）；完整中英文界面（可在设置中切换）。
 // @author       Nuclear_Fish_cyq
 // @match        *://*/*
 // @license      MIT
@@ -104,7 +104,7 @@
             'backup.title': '💾 数据备份',
             'backup.export': '导出数据', 'backup.import': '导入数据', 'backup.clear': '清空数据',
             'backup.luogu': '📥 洛谷导入', 'backup.settings': '⚙ 设置',
-            'backup.note': '导出包含进行中、已完成归档、备注、计时统计（v3 格式）',
+            'backup.note': '导出包含进行中、已完成归档、备忘 / 日历、计时统计（v3 格式）',
             'backup.filename': '做题计划备份',
             'luogu.urlLabel': '洛谷题单 / 做题计划链接',
             'luogu.uidLabel': '洛谷 UID', 'luogu.uidTitle': '可选：填写你的洛谷用户编号（个人主页 user/ 后面的数字）。填写后「跳过已通过」不依赖登录检测，跨站也能用', 'luogu.uidPlaceholder': '如 670355（可选）',
@@ -122,7 +122,17 @@
             'footer.completed': '已完成', 'footer.totalTime': '累计专注',
             'misc.unnamed': '(未命名)', 'misc.unnamedProblem': '未命名题目',
             'memo.placeholder': '输入备忘内容…', 'memo.addBtn': '添加',
+            'cal.today': '今天', 'cal.prev': '上个月', 'cal.next': '下个月', 'cal.ym': '{y} 年 {m} 月',
+            'cal.empty': '这天还没有安排', 'cal.addHere': '新条目将添加到 {d}', 'cal.clearDate': '清除日期',
+            'memo.dateLabel': '日期', 'memo.timeLabel': '时间', 'memo.linkLabel': '链接',
+            'memo.dateBtnTitleAdd': '添加日期（显示在日历上）', 'memo.dateBtnTitleSet': '编辑日期 / 时间 / 链接',
+            'memo.linkOpen': '打开链接', 'memo.linkPlaceholder': '比赛 / 题目链接（可选）',
+            'toast.dateSaved': '日程已保存', 'toast.memoAddedDay': '已添加到 {d}', 'toast.dateCleared': '已清除日期',
+            'contest.addBtn': '📅 加入日历', 'contest.addBtnTitle': '把这场比赛加入做题日历',
+            'contest.addedOk': '✓ 已加入日历', 'contest.alreadyAdded': '该比赛已在日历中', 'contest.fetchFail': '读取比赛信息失败',
+            'toast.contestAdded': '📅 已加入日历：{name}',
             'memo.empty': '暂无备忘，点击上方输入框添加',
+            'memo.allTitle': '全部备忘（{n}）',
             'memo.urgent': '紧急', 'memo.unurgent': '取消紧急',
             'memo.urgentTitle': '设为紧急备忘（置顶显示，角标变红）', 'memo.unurgentTitle': '取消紧急标记',
             'memo.delete': '删除', 'memo.deleteTitle': '删除该备忘',
@@ -157,10 +167,11 @@
             'confirm.giveup': '确定要放弃题目 "{name}" 吗？',
             'confirm.restore': '将 "{name}" 恢复到进行中列表？',
             'confirm.deleteRecord': '永久删除记录 "{name}"？（不影响已完成计数）',
-            'confirm.clear': '确定要清空所有数据（含已完成归档）吗？此操作不可撤销。',
-            'confirm.import': '准备合并导入 {a} 个进行中题目\n已完成归档：{b} 条\n完成计数：{c}\n\n合并模式：按网址去重，已存在的题目不会被覆盖。\n确定继续吗？',
+            'confirm.clear': '确定要清空所有数据（含已完成归档、备忘与日历）吗？此操作不可撤销。',
+            'confirm.import': '准备合并导入 {a} 个进行中题目\n已完成归档：{b} 条\n备忘录：{d} 条\n完成计数：{c}\n\n合并模式：按网址去重，已存在的题目不会被覆盖。\n确定继续吗？',
             'alert.importFail': '导入失败：{e}\n\n请确保选择的是有效的备份文件。',
             'toast.imported': '合并完成：新增进行中 {a} · 归档 {b}',
+            'toast.importedMemos': ' · 备忘 {n}',
             'toast.importedSkip': ' · 跳过重复 {n}',
             'toast.moveRestricted': '置顶与未置顶不能互相移动',
             'toast.noteSaved': '备注已保存', 'toast.recordDeleted': '记录已删除',
@@ -169,6 +180,7 @@
             'toast.focusDoneBreak': '专注完成！休息一下吧 ☕', 'toast.focusDone': '专注完成！🏆',
             'toast.breakDone': '休息结束，继续加油 💪', 'toast.focusStart': '开始专注 {m} 分钟 ⏱',
             'toast.settingsSaved': '设置已保存', 'toast.exported': '数据已导出（含归档）', 'toast.cleared': '数据已清空',
+            'toast.nothingToClear': '当前没有可清空的数据',
             'toast.addSuccess': '添加成功！', 'toast.added': '已加入计划', 'toast.addedDiff': '已加入计划 · 难度 {d}',
             'toast.addedTags': ' · 标签 {n} 个',
             'toast.alreadyInPlan': '此题目已在计划中！', 'toast.alreadyDone': '此题目已在已完成记录中！',
@@ -218,7 +230,7 @@
             'backup.title': '💾 Data Backup',
             'backup.export': 'Export', 'backup.import': 'Import', 'backup.clear': 'Clear All',
             'backup.luogu': '📥 Import from Luogu', 'backup.settings': '⚙ Settings',
-            'backup.note': 'Export includes in-progress, archived, notes, and timer stats (v3 format)',
+            'backup.note': 'Export includes in-progress, archived, memos / calendar, and timer stats (v3 format)',
             'backup.filename': 'problem-planner-backup',
             'luogu.urlLabel': 'Luogu Training List URL',
             'luogu.tagsLabel': '🏷 Add Tags', 'luogu.tagsTitle': 'Auto-fetch problem tags into notes',
@@ -270,10 +282,11 @@
             'confirm.giveup': 'Give up on "{name}"?',
             'confirm.restore': 'Restore "{name}" to in-progress?',
             'confirm.deleteRecord': 'Permanently delete record "{name}"? (completion count unchanged)',
-            'confirm.clear': 'Clear all data (including archive)? This cannot be undone.',
-            'confirm.import': 'About to merge-import {a} in-progress problems\nArchived: {b}\nCompletion count: {c}\n\nMerge mode: dedupe by URL; existing problems will not be overwritten.\nContinue?',
+            'confirm.clear': 'Clear all data (including archive, memos and calendar)? This cannot be undone.',
+            'confirm.import': 'About to merge-import {a} in-progress problems\nArchived: {b}\nMemos: {d}\nCompletion count: {c}\n\nMerge mode: dedupe by URL; existing problems will not be overwritten.\nContinue?',
             'alert.importFail': 'Import failed: {e}\n\nMake sure you selected a valid backup file.',
             'toast.imported': 'Import merged: active +{a} · archive +{b}',
+            'toast.importedMemos': ' · memos {n}',
             'toast.importedSkip': ' · skipped duplicates {n}',
             'toast.moveRestricted': 'Cannot move between pinned and unpinned',
             'toast.noteSaved': 'Note saved', 'toast.recordDeleted': 'Record deleted',
@@ -282,6 +295,7 @@
             'toast.focusDoneBreak': 'Focus done! Take a break ☕', 'toast.focusDone': 'Focus done! 🏆',
             'toast.breakDone': 'Break over, keep going 💪', 'toast.focusStart': 'Focus {m} min ⏱',
             'toast.settingsSaved': 'Settings saved', 'toast.exported': 'Data exported (with archive)', 'toast.cleared': 'Data cleared',
+            'toast.nothingToClear': 'Nothing to clear',
             'toast.addSuccess': 'Added!', 'toast.added': 'Added to plan', 'toast.addedDiff': 'Added · difficulty {d}',
             'toast.addedTags': ' · {n} tags',
             'toast.alreadyInPlan': 'Already in your plan!', 'toast.alreadyDone': 'Already in completed records!',
@@ -359,15 +373,17 @@
             if (currentTab === 'active') renderProblems();
             else if (currentTab === 'done') renderArchiveList();
             else if (currentTab === 'stats') renderStats();
-            else if (currentTab === 'memo') renderMemos();
+            else if (currentTab === 'memo') { renderCalendar(); renderMemos(); }
             syncSettingsUI();
             refreshHomeImportBtn();
         }
-        // 强制重建 OJ / 题单页悬浮按钮以刷新文案
+        // 强制重建 OJ / 题单页 / 比赛页悬浮按钮以刷新文案
         if (ojBtn) { ojBtn.remove(); ojBtn = null; ojInjectedKey = ''; }
         if (trainingBtn) { trainingBtn.remove(); trainingBtn = null; trainingBtnKey = ''; }
+        if (contestBtn) { contestBtn.remove(); contestBtn = null; contestInjectedKey = ''; }
         ensureOJButton();
         ensureTrainingButton();
+        ensureContestButton();
     }
 
     // ==================== 工具 ====================
@@ -512,7 +528,11 @@
             id: (typeof m.id === 'string' && m.id) ? m.id : ('m' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 7)),
             text: typeof m.text === 'string' ? m.text : '',
             urgent: !!m.urgent,
-            createdAt: m.createdAt || new Date().toISOString()
+            createdAt: m.createdAt || new Date().toISOString(),
+            // 日历字段（可选）：date=YYYY-MM-DD 时该条目显示在日历上
+            date: (typeof m.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(m.date)) ? m.date : '',
+            time: (typeof m.time === 'string' && /^\d{2}:\d{2}$/.test(m.time)) ? m.time : '',
+            link: typeof m.link === 'string' ? m.link : ''
         };
     }
 
@@ -880,21 +900,91 @@
         .pp-memo-form .pp-input { flex: 1; }
         .pp-memo-form .pp-btn { flex-shrink: 0; height: 34px; }
         .pp-memo-item {
-            display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; flex-wrap: wrap;
-            padding: 11px 12px 11px 14px; margin-bottom: 9px;
+            display: flex; flex-direction: column; align-items: stretch;
+            padding: 12px 14px; margin-bottom: 9px;
             background: #fff; border: 1px solid #eef1f8; border-radius: 14px;
             box-shadow: 0 2px 6px rgba(23,43,99,.05);
-            transition: transform .2s, box-shadow .2s, border-color .2s;
+            transition: box-shadow .2s, border-color .2s;
             animation: pp-item-in .25s ease both;
         }
-        .pp-memo-item:hover { transform: translateX(4px); box-shadow: 0 6px 14px rgba(23,43,99,.10); }
+        .pp-memo-item:hover { box-shadow: 0 6px 16px rgba(23,43,99,.10); border-color: #e0e7f8; }
         .pp-memo-item.urgent { border-left: 4px solid #FE4C61; background: linear-gradient(90deg, #fff0f2, #fff); box-shadow: 0 2px 8px rgba(254,76,97,.15); }
-        .pp-memo-main { flex: 1; min-width: 0; }
-        .pp-memo-text { font-size: 14px; word-break: break-word; white-space: pre-wrap; line-height: 1.5; color: #2a3248; }
+        .pp-memo-main { width: 100%; min-width: 0; }
+        .pp-memo-text { font-size: 14px; word-break: break-word; white-space: pre-wrap; line-height: 1.6; color: #2a3248; }
         .pp-memo-item.urgent .pp-memo-text { font-weight: 700; }
         .pp-memo-urgent-badge { display: inline-block; font-size: 10px; font-weight: 800; color: #fff; background: #FE4C61; border-radius: 999px; padding: 1px 7px; margin-bottom: 4px; letter-spacing: .5px; }
-        .pp-memo-actions { display: flex; gap: 5px; align-items: center; flex-shrink: 0; flex-wrap: wrap; }
+        .pp-memo-actions {
+            display: flex; gap: 6px; align-items: center; flex-wrap: wrap;
+            width: 100%; padding-top: 8px; margin-top: 8px;
+            border-top: 1px dashed #e9edf8;
+        }
         .pp-memo-time { font-size: 11px; color: #8a93b0; margin-top: 3px; }
+        /* ============ 日历 ============ */
+        .pp-cal { padding: 12px 16px 6px; border-bottom: 1px solid #eef1f8; }
+        .pp-cal-head { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+        .pp-cal-nav {
+            width: 26px; height: 26px; padding: 0; line-height: 1; border-radius: 8px;
+            border: 1.5px solid #e3e8f7; background: #fff; color: #4f7cff;
+            font-size: 15px; font-weight: 800; cursor: pointer; font-family: inherit;
+            transition: background .15s, border-color .15s;
+        }
+        .pp-cal-nav:hover { border-color: #4f7cff; background: #f2f7ff; }
+        .pp-cal-title { flex: 1; text-align: center; font-size: 13.5px; font-weight: 800; color: #4a5578; }
+        .pp-cal-today-btn {
+            border: 1.5px solid #d5dbea; background: #fff; color: #5a6485; border-radius: 999px;
+            padding: 3px 10px; font-size: 11.5px; font-weight: 700; cursor: pointer; font-family: inherit;
+            transition: border-color .15s, color .15s;
+        }
+        .pp-cal-today-btn:hover { border-color: #4f7cff; color: #4f7cff; }
+        .pp-cal-weekdays { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; margin-bottom: 3px; }
+        .pp-cal-weekday { text-align: center; font-size: 10.5px; font-weight: 700; color: #9aa3bf; }
+        .pp-cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; }
+        .pp-cal-cell {
+            position: relative; aspect-ratio: 1; border-radius: 8px; border: 1.5px solid transparent;
+            background: #f8faff; display: flex; align-items: center; justify-content: center;
+            font-size: 12px; font-weight: 600; color: #4a5578; cursor: pointer;
+            transition: background .15s, border-color .15s, color .15s;
+        }
+        .pp-cal-cell:hover { background: #eef3ff; border-color: #c9d4f2; }
+        .pp-cal-cell.other { opacity: .35; }
+        .pp-cal-cell.today { border-color: #4f7cff; color: #4f7cff; font-weight: 800; }
+        .pp-cal-cell.selected { background: linear-gradient(135deg, #4f7cff, #00c6fb); color: #fff; border-color: transparent; }
+        .pp-cal-cell.has-entry::after {
+            content: ''; position: absolute; bottom: 3px; left: 50%; transform: translateX(-50%);
+            width: 4px; height: 4px; border-radius: 50%; background: #f39c11;
+        }
+        .pp-cal-cell.selected.has-entry::after { background: #fff; }
+        .pp-cal-day-head {
+            display: flex; align-items: center; justify-content: space-between;
+            font-size: 12px; font-weight: 700; color: #4a5578; margin: 10px 0 4px;
+        }
+        .pp-cal-day-head .pp-cal-day-count { font-weight: 600; color: #9aa3bf; font-size: 11px; }
+        .pp-cal-day-list { padding: 0 0 6px; }
+        .pp-cal-day-empty { font-size: 12px; color: #9aa3bf; text-align: center; padding: 10px 0; font-style: italic; }
+        .pp-memo-datehint { padding: 0 22px 6px; font-size: 11.5px; color: #4f7cff; font-weight: 600; }
+        .pp-memo-datehint .pp-hint-clear { cursor: pointer; color: #9aa3bf; margin-left: 6px; font-weight: 700; }
+        .pp-memo-datehint .pp-hint-clear:hover { color: #e5484d; }
+        .pp-memo-section-title {
+            padding: 4px 22px 2px; font-size: 11.5px; font-weight: 700; color: #8a93b0; letter-spacing: .3px;
+        }
+        /* 条目上的日期徽章 / 链接 */
+        .pp-memo-date {
+            display: inline-block; font-size: 10.5px; font-weight: 700; color: #2f6fd0;
+            background: #eef3ff; border-radius: 999px; padding: 1px 7px; margin-right: 6px;
+        }
+        .pp-memo-date.today { color: #fff; background: linear-gradient(135deg, #4f7cff, #00c6fb); }
+        .pp-memo-link { font-size: 11.5px; color: #4f7cff; text-decoration: none; margin-top: 4px; display: inline-block; }
+        .pp-memo-link:hover { text-decoration: underline; }
+        /* 日期 / 时间 / 链接编辑器 */
+        .pp-memo-dateedit { width: 100%; padding: 8px 0 2px; }
+        .pp-memo-dateedit-row { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; font-size: 12px; }
+        .pp-memo-dateedit-row label { min-width: 34px; color: #5a6485; font-weight: 600; }
+        .pp-memo-dateedit-row input {
+            flex: 1; padding: 5px 8px; border: 1.5px solid #e3e8f7; border-radius: 8px;
+            font-size: 12px; font-family: inherit; background: #fafbff; box-sizing: border-box;
+        }
+        .pp-memo-dateedit-row input:focus { outline: none; border-color: #4f7cff; background: #fff; }
+        .pp-memo-dateedit-actions { display: flex; gap: 6px; flex-wrap: wrap; }
         .pp-body { flex: 1; overflow-y: auto; }
         .pp-body::-webkit-scrollbar { width: 6px; }
         .pp-body::-webkit-scrollbar-thumb { background: #d5dbee; border-radius: 999px; }
@@ -1018,6 +1108,9 @@
         .pp-tool-pin.pinned { color: #fff; border-color: #e67e22; background: linear-gradient(135deg, #f7b733, #e67e22); }
         .pp-tool-move { color: #5a6485; border-color: #d5dbea; background: #f6f8fd; min-width: 36px; padding: 5px 8px; }
         .pp-tool-move:hover { color: #4f7cff; border-color: #9db4ef; background: #eef3ff; }
+        .pp-tool-date { color: #2f6fd0; border-color: #b9d1f5; background: #f2f7ff; }
+        .pp-tool-date:hover { background: #e3efff; border-color: #8fb6ec; }
+        .pp-tool-date.has-date { color: #fff; border-color: #2f6fd0; background: linear-gradient(135deg, #4f7cff, #2f6fd0); }
         .pp-timer-stop {
             border: 1.5px solid #ffc9cc; background: #fff5f5; color: #e5484d;
             border-radius: 999px; padding: 5px 12px; font-size: 12px; font-weight: 700;
@@ -1186,6 +1279,7 @@
             transition: transform .15s, filter .15s;
         }
         .pp-btn-backup:hover { transform: translateY(-1px); filter: brightness(1.06); }
+        .pp-btn-backup:disabled { opacity: .5; cursor: not-allowed; transform: none; filter: none; box-shadow: none; }
         .pp-export { background: linear-gradient(135deg, #4f7cff, #00c6fb); }
         .pp-import { background: linear-gradient(135deg, #a05ce4, #7b3fd4); }
         .pp-clear { background: linear-gradient(135deg, #ff5f6d, #ff4b5c); }
@@ -1248,7 +1342,31 @@
         .pp-container[data-theme="dark"] .pp-memo-item:hover { border-color: #3a4252; }
         .pp-container[data-theme="dark"] .pp-memo-item.urgent { background: linear-gradient(90deg, #2a1a1e, #161a21); }
         .pp-container[data-theme="dark"] .pp-memo-text { color: #e6e8ee; }
+        .pp-container[data-theme="dark"] .pp-memo-actions { border-top-color: #2a2f3a; }
         .pp-container[data-theme="dark"] .pp-memo-time { color: #7c86a5; }
+        .pp-container[data-theme="dark"] .pp-cal { border-bottom-color: #2a2f3a; }
+        .pp-container[data-theme="dark"] .pp-cal-nav { background: #1a1f28; border-color: #333b4b; color: #6f9bff; }
+        .pp-container[data-theme="dark"] .pp-cal-nav:hover { background: #182540; border-color: #3a4a6b; }
+        .pp-container[data-theme="dark"] .pp-cal-title { color: #a3adc7; }
+        .pp-container[data-theme="dark"] .pp-cal-today-btn { background: #1a1f28; border-color: #333b4b; color: #a3adc7; }
+        .pp-container[data-theme="dark"] .pp-cal-today-btn:hover { border-color: #6f9bff; color: #6f9bff; }
+        .pp-container[data-theme="dark"] .pp-cal-weekday { color: #7c86a5; }
+        .pp-container[data-theme="dark"] .pp-cal-cell { background: #1a1f28; color: #c3c9d8; }
+        .pp-container[data-theme="dark"] .pp-cal-cell:hover { background: #202836; border-color: #3a4252; }
+        .pp-container[data-theme="dark"] .pp-cal-cell.today { border-color: #6f9bff; color: #6f9bff; }
+        .pp-container[data-theme="dark"] .pp-cal-cell.selected { background: linear-gradient(135deg, #4f7cff, #00c6fb); color: #fff; }
+        .pp-container[data-theme="dark"] .pp-cal-day-head { color: #a3adc7; }
+        .pp-container[data-theme="dark"] .pp-cal-day-head .pp-cal-day-count { color: #7c86a5; }
+        .pp-container[data-theme="dark"] .pp-cal-day-empty { color: #7c86a5; }
+        .pp-container[data-theme="dark"] .pp-memo-datehint { color: #6f9bff; }
+        .pp-container[data-theme="dark"] .pp-memo-datehint .pp-hint-clear { color: #7c86a5; }
+        .pp-container[data-theme="dark"] .pp-memo-section-title { color: #7c86a5; }
+        .pp-container[data-theme="dark"] .pp-memo-date { color: #8fb6ec; background: #1d2839; }
+        .pp-container[data-theme="dark"] .pp-memo-date.today { color: #fff; background: linear-gradient(135deg, #4f7cff, #00c6fb); }
+        .pp-container[data-theme="dark"] .pp-memo-link { color: #6f9bff; }
+        .pp-container[data-theme="dark"] .pp-memo-dateedit-row label { color: #a3adc7; }
+        .pp-container[data-theme="dark"] .pp-memo-dateedit-row input { background: #161a21; border-color: #2a2f3a; color: #e6e8ee; }
+        .pp-container[data-theme="dark"] .pp-memo-dateedit-row input:focus { border-color: #6f9bff; background: #1a1f28; }
         .pp-container[data-theme="dark"] .pp-body::-webkit-scrollbar-thumb { background: #343b4b; }
         .pp-container[data-theme="dark"] .pp-body::-webkit-scrollbar-thumb:hover { background: #454f63; }
         .pp-container[data-theme="dark"] .pp-form { border-bottom-color: #2a2f3a; }
@@ -1278,6 +1396,9 @@
         .pp-container[data-theme="dark"] .pp-tool-pin.pinned { color: #fff; border-color: #e67e22; background: linear-gradient(135deg, #f7b733, #e67e22); }
         .pp-container[data-theme="dark"] .pp-tool-move { color: #a3adc7; border-color: #333b4b; background: #1a1f28; }
         .pp-container[data-theme="dark"] .pp-tool-move:hover { color: #6f9bff; border-color: #3a4a6b; background: #182540; }
+        .pp-container[data-theme="dark"] .pp-tool-date { color: #7fa8f2; border-color: #2b3f5c; background: #131c2c; }
+        .pp-container[data-theme="dark"] .pp-tool-date:hover { background: #182540; border-color: #3f5f8c; }
+        .pp-container[data-theme="dark"] .pp-tool-date.has-date { color: #fff; border-color: #4f7cff; background: linear-gradient(135deg, #4f7cff, #2f6fd0); }
         .pp-container[data-theme="dark"] .pp-timer-stop { border-color: #6b3a40; background: #2a1a1e; color: #ff8a8f; }
         .pp-container[data-theme="dark"] .pp-timer-stop:hover { border-color: #a05058; background: #352024; }
         .pp-container[data-theme="dark"] .pp-note-editor textarea { background: #161a21; border-color: #2a2f3a; color: #e6e8ee; }
@@ -1406,10 +1527,24 @@
                 <div class="pp-stats-charts" id="pp-stats-charts"></div>
             </div>
             <div class="pp-view" data-view="memo">
+                <div class="pp-cal">
+                    <div class="pp-cal-head">
+                        <button class="pp-cal-nav" id="pp-cal-prev" data-i18n-title="cal.prev" title="上个月">‹</button>
+                        <span class="pp-cal-title" id="pp-cal-title"></span>
+                        <button class="pp-cal-nav" id="pp-cal-next" data-i18n-title="cal.next" title="下个月">›</button>
+                        <button class="pp-cal-today-btn" id="pp-cal-today" data-i18n="cal.today">今天</button>
+                    </div>
+                    <div class="pp-cal-weekdays" id="pp-cal-weekdays"></div>
+                    <div class="pp-cal-grid" id="pp-cal-grid"></div>
+                    <div class="pp-cal-day-head" id="pp-cal-day-head"></div>
+                    <div class="pp-list pp-cal-day-list" id="pp-cal-day-list"></div>
+                </div>
                 <div class="pp-memo-form">
                     <input type="text" id="pp-memo-input" class="pp-input" data-i18n-placeholder="memo.placeholder" placeholder="输入备忘内容…">
                     <button class="pp-btn pp-complete" id="pp-memo-add" data-i18n="memo.addBtn">添加</button>
                 </div>
+                <div class="pp-memo-datehint" id="pp-memo-datehint" style="display:none;"></div>
+                <div class="pp-memo-section-title" id="pp-memo-all-title"></div>
                 <div class="pp-list" id="pp-memo-list"></div>
             </div>
         </div>
@@ -1533,6 +1668,16 @@
         panel.querySelector('#pp-understood').textContent = understood;
         panel.querySelector('#pp-completed').textContent = completedCount;
         panel.querySelector('#pp-total-time').textContent = formatDuration(totalSeconds);
+        syncClearButton();
+    }
+
+    // 清空数据按钮状态：无任何数据时禁用（避免点了没反应）
+    function syncClearButton() {
+        const btn = panel.querySelector('#pp-clear');
+        if (!btn) return;
+        const hasData = problems.length + archive.length + memos.length > 0;
+        btn.disabled = !hasData;
+        btn.title = hasData ? '' : t('toast.nothingToClear');
     }
 
     function sortedProblems() {
@@ -2271,6 +2416,119 @@
 
     // ==================== 备忘录 ====================
 
+    // ==================== 日历 ====================
+
+    let calYear = new Date().getFullYear();
+    let calMonth = new Date().getMonth(); // 0-11
+    let calSelectedDate = ''; // 选中日期 YYYY-MM-DD；'' = 未选中（下方默认展示今天）
+
+    // 某天的备忘条目（按时间排序）
+    function memosOnDate(key) {
+        return memos.filter(m => m.date === key)
+            .sort((a, b) => String(a.time || '').localeCompare(String(b.time || '')));
+    }
+
+    // 渲染日历（月视图网格 + 选中日期条目列表 + 输入区日期提示）
+    function renderCalendar() {
+        const grid = panel.querySelector('#pp-cal-grid');
+        const weekdaysEl = panel.querySelector('#pp-cal-weekdays');
+        const titleEl = panel.querySelector('#pp-cal-title');
+        const dayHead = panel.querySelector('#pp-cal-day-head');
+        const dayList = panel.querySelector('#pp-cal-day-list');
+        if (!grid || !weekdaysEl || !titleEl || !dayHead || !dayList) return;
+
+        titleEl.textContent = t('cal.ym', { y: calYear, m: calMonth + 1 });
+
+        // 星期表头（周日开头）
+        const wd = currentLang === 'en'
+            ? ['S', 'M', 'T', 'W', 'T', 'F', 'S']
+            : ['日', '一', '二', '三', '四', '五', '六'];
+        weekdaysEl.innerHTML = wd.map(w => '<span class="pp-cal-weekday">' + w + '</span>').join('');
+
+        // 月视图单元格：上月补位 + 本月 + 下月补齐（至少 5 行）
+        const startOffset = new Date(calYear, calMonth, 1).getDay();
+        const daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
+        const prevMonthDays = new Date(calYear, calMonth, 0).getDate();
+        const cells = [];
+        for (let i = startOffset - 1; i >= 0; i--) {
+            cells.push({ date: new Date(calYear, calMonth - 1, prevMonthDays - i), other: true });
+        }
+        for (let d = 1; d <= daysInMonth; d++) {
+            cells.push({ date: new Date(calYear, calMonth, d), other: false });
+        }
+        let nextDay = 1;
+        while (cells.length < 35 || cells.length % 7 !== 0) {
+            cells.push({ date: new Date(calYear, calMonth + 1, nextDay++), other: true });
+        }
+
+        const todayKey = dateKey(new Date());
+        grid.innerHTML = '';
+        cells.forEach(c => {
+            const key = dateKey(c.date);
+            const cellEl = document.createElement('div');
+            cellEl.className = 'pp-cal-cell' + (c.other ? ' other' : '');
+            if (key === todayKey) cellEl.classList.add('today');
+            if (key === calSelectedDate) cellEl.classList.add('selected');
+            if (memosOnDate(key).length) cellEl.classList.add('has-entry');
+            cellEl.textContent = c.date.getDate();
+            cellEl.title = key;
+            cellEl.addEventListener('click', () => {
+                // 再点一次已选中的日期 = 取消选中（新条目不带日期）
+                calSelectedDate = (calSelectedDate === key) ? '' : key;
+                if (c.other) {
+                    calYear = c.date.getFullYear();
+                    calMonth = c.date.getMonth();
+                }
+                renderCalendar();
+            });
+            grid.appendChild(cellEl);
+        });
+
+        // 选中日期的条目列表（未选中时展示今天）
+        const viewKey = calSelectedDate || todayKey;
+        const dayMemos = memosOnDate(viewKey);
+        dayHead.innerHTML = '<span>📅 ' + viewKey + (calSelectedDate ? '' : ' · ' + t('cal.today')) + '</span>'
+            + '<span class="pp-cal-day-count">' + dayMemos.length + '</span>';
+        dayList.innerHTML = '';
+        if (!dayMemos.length) {
+            dayList.innerHTML = '<div class="pp-cal-day-empty">' + t('cal.empty') + '</div>';
+        } else {
+            dayMemos.forEach(m => dayList.appendChild(createMemoItem(m)));
+        }
+
+        // 输入区日期提示（选中日期时新条目自动带上该日期）
+        const hint = panel.querySelector('#pp-memo-datehint');
+        if (hint) {
+            if (calSelectedDate) {
+                hint.style.display = '';
+                hint.innerHTML = '';
+                hint.appendChild(document.createTextNode(t('cal.addHere', { d: calSelectedDate })));
+                const clear = document.createElement('span');
+                clear.className = 'pp-hint-clear';
+                clear.textContent = '✕ ' + t('cal.clearDate');
+                clear.addEventListener('click', () => { calSelectedDate = ''; renderCalendar(); });
+                hint.appendChild(clear);
+            } else {
+                hint.style.display = 'none';
+            }
+        }
+    }
+
+    function calShiftMonth(delta) {
+        const d = new Date(calYear, calMonth + delta, 1);
+        calYear = d.getFullYear();
+        calMonth = d.getMonth();
+        renderCalendar();
+    }
+
+    function calGoToday() {
+        const now = new Date();
+        calYear = now.getFullYear();
+        calMonth = now.getMonth();
+        calSelectedDate = dateKey(now);
+        renderCalendar();
+    }
+
     // 紧急优先排序（紧急置顶）
     function sortedMemos() {
         return [...memos.filter(m => m.urgent), ...memos.filter(m => !m.urgent)];
@@ -2284,11 +2542,14 @@
         badge.textContent = memos.length;
         badge.classList.toggle('urgent', urgentCount > 0);
         badge.title = urgentCount > 0 ? t('memo.urgentTitle') : '';
+        syncClearButton();
     }
 
     function renderMemos() {
         const list = panel.querySelector('#pp-memo-list');
         updateMemoCount();
+        const titleEl = panel.querySelector('#pp-memo-all-title');
+        if (titleEl) titleEl.textContent = memos.length ? t('memo.allTitle', { n: memos.length }) : '';
         if (memos.length === 0) {
             list.innerHTML = '<div class="pp-empty"><span class="pp-empty-icon">📝</span><span class="pp-empty-text">' + t('memo.empty') + '</span></div>';
             return;
@@ -2312,8 +2573,26 @@
         }
         const text = document.createElement('div');
         text.className = 'pp-memo-text';
-        text.textContent = memo.text;
+        // 日历条目：日期（+时间）徽章显示在文本前
+        if (memo.date) {
+            const dateBadge = document.createElement('span');
+            dateBadge.className = 'pp-memo-date' + (memo.date === dateKey(new Date()) ? ' today' : '');
+            dateBadge.textContent = '📅 ' + memo.date + (memo.time ? ' ' + memo.time : '');
+            text.appendChild(dateBadge);
+        }
+        text.appendChild(document.createTextNode(memo.text));
         main.appendChild(text);
+        // 关联链接（比赛 / 题目）
+        if (memo.link) {
+            const linkEl = document.createElement('a');
+            linkEl.className = 'pp-memo-link';
+            linkEl.href = memo.link;
+            linkEl.target = '_blank';
+            linkEl.rel = 'noopener noreferrer';
+            linkEl.textContent = '🔗 ' + t('memo.linkOpen');
+            linkEl.title = memo.link;
+            main.appendChild(linkEl);
+        }
         const time = document.createElement('div');
         time.className = 'pp-memo-time';
         time.textContent = formatDateTime(memo.createdAt);
@@ -2322,6 +2601,14 @@
 
         const actions = document.createElement('div');
         actions.className = 'pp-memo-actions';
+
+        // 日期 / 时间 / 链接编辑（写入日历）
+        const dateBtn = document.createElement('button');
+        dateBtn.className = 'pp-tool-btn pp-tool-date' + (memo.date ? ' has-date' : '');
+        dateBtn.textContent = '📅';
+        dateBtn.title = memo.date ? t('memo.dateBtnTitleSet') : t('memo.dateBtnTitleAdd');
+        dateBtn.addEventListener('click', (e) => { e.preventDefault(); toggleMemoDateEditor(item, memo); });
+        actions.appendChild(dateBtn);
 
         const urgentBtn = document.createElement('button');
         urgentBtn.className = 'pp-tool-btn pp-tool-pin' + (memo.urgent ? ' pinned' : '');
@@ -2355,12 +2642,93 @@
         return item;
     }
 
+    // 日期 / 时间 / 链接编辑器（展开在条目下方，复用备注编辑器的交互模式）
+    function toggleMemoDateEditor(item, memo) {
+        const existing = item.querySelector('.pp-memo-dateedit');
+        if (existing) { existing.remove(); return; }
+        item.querySelectorAll('.pp-memo-dateedit').forEach(el => el.remove());
+
+        const editor = document.createElement('div');
+        editor.className = 'pp-memo-dateedit';
+        const mkRow = (labelText, inputEl) => {
+            const row = document.createElement('div');
+            row.className = 'pp-memo-dateedit-row';
+            const lab = document.createElement('label');
+            lab.textContent = labelText;
+            row.appendChild(lab);
+            row.appendChild(inputEl);
+            return row;
+        };
+        const dateInput = document.createElement('input');
+        dateInput.type = 'date';
+        dateInput.value = memo.date || '';
+        const timeInput = document.createElement('input');
+        timeInput.type = 'time';
+        timeInput.value = memo.time || '';
+        const linkInput = document.createElement('input');
+        linkInput.type = 'text';
+        linkInput.placeholder = t('memo.linkPlaceholder');
+        linkInput.value = memo.link || '';
+        editor.appendChild(mkRow(t('memo.dateLabel'), dateInput));
+        editor.appendChild(mkRow(t('memo.timeLabel'), timeInput));
+        editor.appendChild(mkRow(t('memo.linkLabel'), linkInput));
+
+        const actionRow = document.createElement('div');
+        actionRow.className = 'pp-memo-dateedit-actions';
+        const saveBtn = document.createElement('button');
+        saveBtn.className = 'pp-btn pp-complete pp-btn-sm';
+        saveBtn.type = 'button';
+        saveBtn.textContent = t('note.save');
+        saveBtn.addEventListener('click', () => {
+            const idx = memos.findIndex(x => x.id === memo.id);
+            if (idx !== -1) {
+                memos[idx].date = dateInput.value || '';
+                memos[idx].time = timeInput.value || '';
+                memos[idx].link = linkInput.value.trim();
+                memos[idx] = normalizeMemo(memos[idx]);
+                saveMemos();
+                showToast(t('toast.dateSaved'), '#3498DB');
+            }
+            renderCalendar();
+            renderMemos();
+        });
+        const cancelBtn = document.createElement('button');
+        cancelBtn.className = 'pp-btn pp-giveup pp-btn-sm';
+        cancelBtn.type = 'button';
+        cancelBtn.textContent = t('note.cancel');
+        cancelBtn.addEventListener('click', () => { renderCalendar(); renderMemos(); });
+        actionRow.appendChild(saveBtn);
+        actionRow.appendChild(cancelBtn);
+        if (memo.date) {
+            const clearBtn = document.createElement('button');
+            clearBtn.className = 'pp-btn pp-giveup pp-btn-sm';
+            clearBtn.type = 'button';
+            clearBtn.textContent = t('memo.clearDate');
+            clearBtn.addEventListener('click', () => {
+                const idx = memos.findIndex(x => x.id === memo.id);
+                if (idx !== -1) {
+                    memos[idx] = normalizeMemo({ ...memos[idx], date: '', time: '' });
+                    saveMemos();
+                    showToast(t('toast.dateCleared'), '#F39C11');
+                }
+                renderCalendar();
+                renderMemos();
+            });
+            actionRow.appendChild(clearBtn);
+        }
+        editor.appendChild(actionRow);
+
+        item.appendChild(editor);
+        dateInput.focus();
+    }
+
     function toggleMemoUrgent(id) {
         const m = memos.find(x => x.id === id);
         if (!m) return;
         m.urgent = !m.urgent;
         saveMemos();
         renderMemos();
+        renderCalendar();
     }
 
     function deleteMemo(id) {
@@ -2368,6 +2736,7 @@
         memos = memos.filter(x => x.id !== id);
         saveMemos();
         renderMemos();
+        renderCalendar();
     }
 
     // 移动备忘（同紧急组内交换，与题目置顶逻辑一致）
@@ -2385,16 +2754,23 @@
         memos = [...sorted.filter(m => m.urgent), ...sorted.filter(m => !m.urgent)];
         saveMemos();
         renderMemos();
+        renderCalendar();
     }
 
     function addMemo() {
         const input = panel.querySelector('#pp-memo-input');
         const text = input.value.trim();
         if (!text) { input.focus(); return; }
-        memos.push(normalizeMemo({ text, urgent: false, createdAt: new Date().toISOString() }));
+        // 日历中选中日期时，新条目自动带上该日期（显示在日历上）
+        memos.push(normalizeMemo({
+            text, urgent: false, createdAt: new Date().toISOString(),
+            date: calSelectedDate || ''
+        }));
         saveMemos();
         input.value = '';
         renderMemos();
+        renderCalendar();
+        if (calSelectedDate) showToast(t('toast.memoAddedDay', { d: calSelectedDate }), '#52C41A');
         input.focus();
     }
 
@@ -2407,7 +2783,7 @@
         if (tab === 'active') renderProblems();
         else if (tab === 'done') renderArchiveList();
         else if (tab === 'stats') renderStats();
-        else if (tab === 'memo') renderMemos();
+        else if (tab === 'memo') { renderCalendar(); renderMemos(); }
     }
 
     panel.querySelectorAll('.pp-tab').forEach(tab => {
@@ -2446,9 +2822,11 @@
                 const data = JSON.parse(e.target.result);
                 if (!data.problems || !Array.isArray(data.problems)) throw new Error(t('alert.invalidData'));
                 const importedArchive = Array.isArray(data.archive) ? data.archive : [];
+                const importedMemos = Array.isArray(data.memos) ? data.memos : [];
                 const ok = confirm(t('confirm.import', {
                     a: data.problems.length,
                     b: importedArchive.length,
+                    d: importedMemos.length,
                     c: data.completedCount || 0
                 }));
                 if (!ok) { event.target.value = ''; return; }
@@ -2478,16 +2856,31 @@
                     addedArch++;
                 });
 
+                // 合并备忘（含日历条目）：按 id 去重
+                const existingMemoIds = new Set(memos.map(m => m.id));
+                let addedMemo = 0;
+                importedMemos.forEach(m => {
+                    const nm = normalizeMemo(m);
+                    if (!nm.text || existingMemoIds.has(nm.id)) return;
+                    existingMemoIds.add(nm.id);
+                    memos.push(nm);
+                    addedMemo++;
+                });
+
                 // 完成计数取两者较大值（合并不倒退统计）
                 completedCount = Math.max(completedCount, data.completedCount || 0);
 
                 clearTimer();
                 saveData();
                 saveArchive();
+                saveMemos();
                 renderProblems();
                 renderArchiveList();
+                renderCalendar();
+                renderMemos();
                 showToast(
                     t('toast.imported', { a: addedActive, b: addedArch }) +
+                    (addedMemo ? t('toast.importedMemos', { n: addedMemo }) : '') +
                     (skippedActive + skippedArch ? t('toast.importedSkip', { n: skippedActive + skippedArch }) : ''),
                     '#52C41A'
                 );
@@ -2505,15 +2898,25 @@
     }
 
     function clearAllData() {
-        if (problems.length + archive.length > 0 && confirm(t('confirm.clear'))) {
+        const total = problems.length + archive.length + memos.length;
+        // 无数据时给出明确提示（避免误以为按钮失效）
+        if (total === 0) {
+            showToast(t('toast.nothingToClear'), '#F39C11');
+            return;
+        }
+        if (confirm(t('confirm.clear'))) {
             clearTimer();
             problems = [];
             archive = [];
+            memos = [];
             completedCount = 0;
             saveData();
             saveArchive();
+            saveMemos();
             renderProblems();
             renderArchiveList();
+            renderCalendar();
+            renderMemos();
             showToast(t('toast.cleared'), '#FE4C61');
         }
     }
@@ -3276,6 +3679,81 @@
         setInterval(ensureOJButton, 1500);
     }
 
+    // ==================== 洛谷比赛 → 日历 ====================
+
+    // 识别洛谷比赛详情页（/contest/{id}，排除列表等非比赛页）
+    function detectContest() {
+        const h = location.hostname.toLowerCase();
+        if (h !== 'www.luogu.com.cn' && h !== 'luogu.com.cn') return null;
+        const m = location.pathname.match(/^\/contest\/(\d+)(?:\/|$)/);
+        if (!m) return null;
+        return { id: m[1], pageUrl: 'https://' + h + '/contest/' + m[1] };
+    }
+
+    // 从页面 lentille-context 读取比赛数据（名称 + 开始/结束时间戳）
+    function contestDataFromPage() {
+        try {
+            const el = document.getElementById('lentille-context');
+            if (!el) return null;
+            const json = JSON.parse(el.textContent);
+            const c = json && json.data && json.data.contest;
+            if (!c || !c.name) return null;
+            return { id: c.id, name: c.name, startTime: c.startTime, endTime: c.endTime };
+        } catch (e) { return null; }
+    }
+
+    // 一键把当前比赛加入日历（按比赛链接去重）
+    async function addContestToCalendar(btn) {
+        const det = detectContest();
+        if (!det) return;
+        const c = contestDataFromPage();
+        if (!c) { showToast(t('contest.fetchFail'), '#F39C11'); return; }
+        const url = det.pageUrl;
+        if (memos.some(m => m.link === url)) { showToast(t('contest.alreadyAdded'), '#F39C11'); return; }
+        const d = new Date((c.startTime || 0) * 1000);
+        const date = dateKey(d);
+        const time = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+        memos.push(normalizeMemo({
+            text: c.name, link: url, date, time,
+            createdAt: new Date().toISOString()
+        }));
+        saveMemos();
+        updateMemoCount();
+        if (btn) {
+            btn.textContent = t('contest.addedOk');
+            btn.classList.add('ok');
+            setTimeout(() => { btn.classList.remove('ok'); btn.textContent = t('contest.addBtn'); }, 1500);
+        }
+        showToast(t('toast.contestAdded', { name: c.name }), '#52C41A');
+    }
+
+    // 比赛页悬浮按钮注入（轮询检测，兼容洛谷 PJAX 页面切换）
+    let contestBtn = null;
+    let contestInjectedKey = '';
+
+    function ensureContestButton() {
+        const det = detectContest();
+        const key = det ? ('contest|' + det.id) : '';
+        if (key === contestInjectedKey) return;
+        contestInjectedKey = key;
+        if (contestBtn) { contestBtn.remove(); contestBtn = null; }
+        if (!det) return;
+        contestBtn = document.createElement('div');
+        contestBtn.className = 'pp-oj-group';
+        const main = document.createElement('button');
+        main.className = 'pp-oj-btn';
+        main.textContent = t('contest.addBtn');
+        main.title = t('contest.addBtnTitle');
+        main.addEventListener('click', () => addContestToCalendar(main));
+        contestBtn.appendChild(main);
+        document.body.appendChild(contestBtn);
+    }
+
+    function startContestWatch() {
+        ensureContestButton();
+        setInterval(ensureContestButton, 1500);
+    }
+
     // ==================== 洛谷题单页批量导入按钮 ====================
 
     let trainingBtn = null;
@@ -3759,6 +4237,10 @@
 
     // 备忘录：添加按钮 + 回车添加
     panel.querySelector('#pp-memo-add').addEventListener('click', addMemo);
+    // 日历导航：上/下月切换 + 回到今天
+    panel.querySelector('#pp-cal-prev').addEventListener('click', () => calShiftMonth(-1));
+    panel.querySelector('#pp-cal-next').addEventListener('click', () => calShiftMonth(1));
+    panel.querySelector('#pp-cal-today').addEventListener('click', calGoToday);
     panel.querySelector('#pp-memo-input').addEventListener('keypress', (e) => {
         if (e.key === 'Enter') addMemo();
     });
@@ -3835,4 +4317,5 @@
     adoptTimerState();
     startOjWatch();
     startTrainingWatch();
+    startContestWatch();
 })();
