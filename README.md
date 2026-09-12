@@ -2,8 +2,6 @@
 
 [English](./README-en.md) | [简体中文](./README.md)
 
-> 做题计划管理器 v3.11.0 —— 洛谷做题计划 better
-
 一款面向 OI / ACM / 算法学习者的**跨站做题计划管理器**。全站注入，无论你在刷洛谷、Codeforces、AtCoder 还是 UVa，都能随时把题目收进自己的做题清单，专注、打卡、统计一条龙。
 
 - 🦾 脚本管理端：**Tampermonkey** 等
