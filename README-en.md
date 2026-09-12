@@ -81,6 +81,11 @@ node --check 做题计划管理器.user.js
 
 ## 📜 Changelog
 
+### v3.13.x
+
+- v3.13.1: Added a calendar feature to the memo section. You can now add events to your calendar with a single tap from the competition interface.
+- v3.13.2: Fixed several issues.
+
 ### v3.12.x
 
 - v3.12.0: Now you can skip accepted problems when importing a Luogu training list.
